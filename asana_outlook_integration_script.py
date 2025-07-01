@@ -10,37 +10,51 @@ import time
 import sys
 import msal
 import requests
+import logging
+import ast
+from dotenv import load_dotenv
 try:
     import asana
 except ImportError:
     sys.exit("ERROR: Missing dependency 'asana'. Please install via 'pip install asana'")
 from requests.exceptions import HTTPError
 
+# load environment variables and configure logging
+load_dotenv()
+logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
+logger = logging.getLogger(__name__)
+
 # ------------------------------------------------------------
 # CONFIGURATION — EDIT THESE VALUES
 # ------------------------------------------------------------
-TENANT_ID             = "10a53ce9-0d13-47d2-876c-57bfa6433582"
-CLIENT_ID             = "4ed4dfba-881a-40e4-9190-ac0e90cb1796"
-CLIENT_SECRET         = "RWm8Q~offFmH4d_CuU1YTeiOiyzz6018LBfc7bMX"
+TENANT_ID             = os.getenv("TENANT_ID")
+CLIENT_ID             = os.getenv("CLIENT_ID")
+CLIENT_SECRET         = os.getenv("CLIENT_SECRET")
 SCOPES                = ["https://graph.microsoft.com/.default"]
 
-MAIL_USER             = "TMyers@hurricanefence.com"
-MAIL_FOLDER_PATH      = ["Inbox", "2024 Jobs", "Nova", "2411001"]
+MAIL_USER             = os.getenv("MAIL_USER")
+MAIL_FOLDER_PATH      = ast.literal_eval(os.getenv("MAIL_FOLDER_PATH", "[]"))
 
-ASANA_PAT             = "2/1208111632809268/1210537347912656:56277a87abb51ac95aedaf8d58c585ca"
-ASANA_WORKSPACE_GID   = "1208111550442047"
-ASANA_PROJECT_GID     = "1210440111585066"
-ASANA_SECTION_GID     = "1210445509137313"
+ASANA_PAT             = os.getenv("ASANA_PAT")
+ASANA_WORKSPACE_GID   = os.getenv("ASANA_WORKSPACE_GID")
+ASANA_PROJECT_GID     = os.getenv("ASANA_PROJECT_GID")
+ASANA_SECTION_GID     = os.getenv("ASANA_SECTION_GID")
 
 PROCESSED_IDS_FILE    = "processed_ids.txt"
 TEMP_DIR              = "temp_attachments"
 SLEEP_INTERVAL        = 0.5  # seconds between operations
 
-LOCATION_FIELD_GID    = "1208148657165841"
-JOB_NUMBER_FIELD_GID  = "1210440111585075"
+LOCATION_FIELD_GID    = os.getenv("LOCATION_FIELD_GID")
+JOB_NUMBER_FIELD_GID  = os.getenv("JOB_NUMBER_FIELD_GID")
 # ------------------------------------------------------------
 # END CONFIGURATION
 # ------------------------------------------------------------
+
+required_vars = [TENANT_ID, CLIENT_ID, CLIENT_SECRET, MAIL_USER, ASANA_PAT,
+                 ASANA_WORKSPACE_GID, ASANA_PROJECT_GID, ASANA_SECTION_GID]
+if not all(required_vars):
+    logger.error("Missing required environment variables. Check your .env file.")
+    sys.exit(1)
 
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 
@@ -54,7 +68,7 @@ def get_access_token():
     result = app.acquire_token_for_client(scopes=SCOPES)
     if "access_token" not in result:
         raise Exception(f"Token error: {result.get('error_description')}")
-    print("[Graph] Acquired access token")
+    logger.info("[Graph] Acquired access token")
     return result["access_token"]
 
 
@@ -83,7 +97,7 @@ def connect_asana(pat):
     attach_api = asana.AttachmentsApi(client)
     sections_api = asana.SectionsApi(client)
     user = asana.UsersApi(client).get_user("me", {})
-    print(f"[Asana] Connected as {user['name']} ({user['email']})")
+    logger.info("[Asana] Connected as %s (%s)", user['name'], user['email'])
     return tasks_api, attach_api, sections_api
 
 
@@ -102,7 +116,7 @@ def get_target_folder_id(token, path_list):
         if not match:
             raise Exception(f"Folder '{part}' not found at {url}")
         folder_id = match.get("id")
-    print(f"[Graph] Folder ID '{folder_id}' for path {'/'.join(path_list)}")
+    logger.info("[Graph] Folder ID '%s' for path %s", folder_id, '/'.join(path_list))
     return folder_id
 
 
@@ -159,6 +173,9 @@ def process_message(msg, tasks_api, attach_api, sections_api, location, job_num,
     for att in msg.get("attachments", []):
         if att.get("@odata.type", "").endswith("ItemAttachment"):
             continue
+        if att.get("size", 0) > 3 * 1024 * 1024:
+            logger.warning("[SKIP] Attachment too large: %s", att.get("name"))
+            continue
         att_id = att.get("id")
         url = (
             f"{GRAPH_BASE}/users/{MAIL_USER}/mailFolders/"
@@ -170,7 +187,7 @@ def process_message(msg, tasks_api, attach_api, sections_api, location, job_num,
             r.raise_for_status()
         except HTTPError:
             if r.status_code == 413:
-                print(f"[SKIP] Attachment too large: {att.get('name')}")
+                logger.warning("[SKIP] Attachment too large: %s", att.get('name'))
                 continue
             else:
                 raise
@@ -193,24 +210,33 @@ def main():
         f"{GRAPH_BASE}/users/{MAIL_USER}/mailFolders/{fid}/messages?"
         f"$select=id,subject,receivedDateTime,from,body,parentFolderId&$expand=attachments"
     )
-    resp = requests.get(url, headers=headers)
-    resp.raise_for_status()
-    msgs = resp.json().get("value", [])
-
-    for msg in msgs:
-        mid = msg.get("id")
-        if mid in done:
-            continue
+    next_url = url
+    while next_url:
+        resp = requests.get(next_url, headers=headers)
         try:
-            loc = MAIL_FOLDER_PATH[-2]
-            job = MAIL_FOLDER_PATH[-1]
-            process_message(msg, tasks_api, attach_api, sections_api, loc, job, token)
-            save_processed_id(PROCESSED_IDS_FILE, mid)
-        except Exception as e:
-            print(f"[ERROR] {mid}: {e}")
-        time.sleep(SLEEP_INTERVAL)
+            resp.raise_for_status()
+        except HTTPError as err:
+            logger.error("Request failed: %s", err)
+            break
+        data = resp.json()
+        msgs = data.get("value", [])
 
-    print("✅ Dry-run complete.")
+        for msg in msgs:
+            mid = msg.get("id")
+            if mid in done:
+                continue
+            try:
+                loc = MAIL_FOLDER_PATH[-2]
+                job = MAIL_FOLDER_PATH[-1]
+                process_message(msg, tasks_api, attach_api, sections_api, loc, job, token)
+                save_processed_id(PROCESSED_IDS_FILE, mid)
+            except Exception as e:
+                logger.error("[ERROR] %s: %s", mid, e)
+            time.sleep(SLEEP_INTERVAL)
+
+        next_url = data.get("@odata.nextLink")
+
+    logger.info("✅ Dry-run complete.")
 
 
 if __name__ == "__main__":
