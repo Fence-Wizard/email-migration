@@ -1,0 +1,42 @@
+# GitHub Actions workflow to run main.py
+# Trigger manually from the Actions tab
+name: Run Python Script
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        if: hashFiles('requirements.txt') != ''
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run script
+        env:
+          TENANT_ID: ${{ secrets.TENANT_ID }}
+          CLIENT_ID: ${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+          MAIL_USER: ${{ secrets.MAIL_USER }}
+          MAIL_FOLDER_PATH: ${{ secrets.MAIL_FOLDER_PATH }}
+          ASANA_PAT: ${{ secrets.ASANA_PAT }}
+          ASANA_WORKSPACE_GID: ${{ secrets.ASANA_WORKSPACE_GID }}
+          ASANA_PROJECT_GID: ${{ secrets.ASANA_PROJECT_GID }}
+          ASANA_SECTION_GID: ${{ secrets.ASANA_SECTION_GID }}
+          LOCATION_FIELD_GID: ${{ secrets.LOCATION_FIELD_GID }}
+          JOB_NUMBER_FIELD_GID: ${{ secrets.JOB_NUMBER_FIELD_GID }}
+        run: |
+          echo "Running main.py"
+          python main.py
+
