@@ -206,6 +206,7 @@ def main():
     tasks_api, attach_api, sections_api = connect_asana(ASANA_PAT)
 
     fid = get_target_folder_id(token, MAIL_FOLDER_PATH)
+    # ask Microsoft Graph to include id, subject, body, and date on each message
     headers = {"Authorization": f"Bearer {token}"}
     params = {
         "$select": "id,subject,body,receivedDateTime,from,parentFolderId",
@@ -230,10 +231,11 @@ def main():
             if mid in done:
                 continue
 
+            # skip any message where Graph didn’t return a body
             body_node = msg.get("body", {})
-            text = body_node.get("content") if isinstance(body_node, dict) else None
+            text = body_node.get("content")
             if not text:
-                logger.warning(f"Skipping {mid}—no body")
+                logger.warning(f"Skipping message {msg.get('id')}—no body")
                 continue
 
             try:
