@@ -144,7 +144,7 @@ def process_message(msg, tasks_api, attach_api, sections_api, location, job_num,
     if isinstance(body_node, dict):
         if "content" not in body_node:
             logger.error(
-                "Message %s: 'body' missing 'content' key. Available body keys: %r",
+                "Message %s: 'body' missing 'content' key. Available keys: %r",
                 msg.get("id"),
                 list(body_node.keys()),
             )
