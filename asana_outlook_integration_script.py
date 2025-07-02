@@ -22,8 +22,13 @@ from requests.exceptions import HTTPError
 # load environment variables and configure logging
 ENV_FILE = os.getenv("ENV_FILE", ".env")
 load_dotenv(ENV_FILE)
-logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='[%(asctime)s] [%(levelname)s] %(name)s: %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 # ------------------------------------------------------------
 # CONFIGURATION — EDIT THESE VALUES
@@ -226,9 +231,13 @@ def main():
             logger.error("Request failed: %s", err)
             break
         data = resp.json()
+        logger.debug(
+            "Raw Graph response sample: %r",
+            data.get("value", [])[:2]
+        )
         msgs = data.get("value", [])
         logger.debug(
-            "Graph returned %d messages; sample keys: %s",
+            "Graph returned %d messages; keys of first 3: %r",
             len(msgs),
             [list(m.keys()) for m in msgs[:3]]
         )
@@ -236,7 +245,7 @@ def main():
         for msg in msgs:
             # --- DEBUG: inspect each msg before processing ---
             logger.debug(
-                "Inspecting message %s: keys=%s",
+                "Inspecting message %s: keys=%r",
                 msg.get("id"),
                 list(msg.keys())
             )
