@@ -134,11 +134,22 @@ def process_message(msg, tasks_api, attach_api, sections_api, location, job_num,
            .get("address", "")
     )
 
-    # safely extract body content or fallback to preview
-    if isinstance(msg.get("body"), dict):
-        body = msg["body"].get("content", "")
+    # --- DEBUG: inspect the raw body node ---
+    body_node = msg.get("body")
+    logger.debug("Body node for message %s: %r", msg.get("id"), body_node)
+    if isinstance(body_node, dict):
+        if 'content' not in body_node:
+            logger.error(
+                "Message %s: 'body' missing 'content' key. Available body keys: %r",
+                msg.get('id'), list(body_node.keys())
+            )
+        body = body_node.get("content", "")
     else:
-        body = msg.get("bodyPreview", "")
+        preview = msg.get("bodyPreview")
+        logger.debug(
+            "Using bodyPreview for message %s: %r", msg.get('id'), preview
+        )
+        body = preview or ""
 
     notes = (
         f"**Location:** {location}\n"
@@ -274,7 +285,10 @@ def main():
                 process_message(msg, tasks_api, attach_api, sections_api, loc, job, token)
                 save_processed_id(PROCESSED_IDS_FILE, mid)
             except Exception as e:
-                logger.error("[ERROR] %s: %s", mid, e)
+                # emit full stack trace and raw message for post-mortem
+                logger.exception(
+                    "Error processing message %s; raw payload: %r", mid, msg
+                )
             time.sleep(SLEEP_INTERVAL)
 
         next_url = data.get("@odata.nextLink")
