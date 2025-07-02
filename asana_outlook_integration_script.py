@@ -20,7 +20,8 @@ except ImportError:
 from requests.exceptions import HTTPError
 
 # load environment variables and configure logging
-load_dotenv()
+ENV_FILE = os.getenv("ENV_FILE", ".env")
+load_dotenv(ENV_FILE)
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
