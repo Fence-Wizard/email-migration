@@ -210,14 +210,19 @@ def process_message(msg, tasks_api, attach_api, sections_api, location, job_num,
             e,
         )
 
-    # update custom fields
+    # update custom fields on the created task (wrap under 'body')
     update_payload = {
-        "custom_fields": {
-            LOCATION_FIELD_GID: location,
-            JOB_NUMBER_FIELD_GID: int(job_num)
-        }
+        LOCATION_FIELD_GID: location,
+        JOB_NUMBER_FIELD_GID: int(job_num)
     }
-    tasks_api.update_task(gid, {"data": update_payload}, {})
+    tasks_api.update_task(
+        gid,
+        {
+            "body": {
+                "data": update_payload
+            }
+        }
+    )
 
     # handle attachments
     ensure_temp_dir(TEMP_DIR)
