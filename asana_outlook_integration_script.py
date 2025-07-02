@@ -216,8 +216,10 @@ def main():
     url = f"{GRAPH_BASE}/users/{MAIL_USER}/mailFolders/{fid}/messages"
     next_url = url
     while next_url:
-        resp = requests.get(next_url, headers=headers,
-                           params=params if next_url == url else None)
+        req_params = params if next_url == url else None
+        logger.debug(
+            "Graph GET %s with params: %s", next_url, req_params)
+        resp = requests.get(next_url, headers=headers, params=req_params)
         try:
             resp.raise_for_status()
         except HTTPError as err:
@@ -225,21 +227,36 @@ def main():
             break
         data = resp.json()
         msgs = data.get("value", [])
+        logger.debug(
+            "Graph returned %d messages; sample keys: %s",
+            len(msgs),
+            [list(m.keys()) for m in msgs[:3]]
+        )
 
         for msg in msgs:
-            # Skip any message where Graph didn’t return a body field
+            # --- DEBUG: inspect each msg before processing ---
+            logger.debug(
+                "Inspecting message %s: keys=%s",
+                msg.get("id"),
+                list(msg.keys())
+            )
             if 'body' not in msg:
-                logger.warning(f"Skipping message {msg.get('id')}\u2014no body returned")
+                logger.warning(
+                    "Skipping message %s—no 'body' key. Available keys: %s",
+                    msg.get("id"),
+                    list(msg.keys())
+                )
+                continue
+            content = msg['body'].get('content')
+            if not content:
+                logger.warning(
+                    "Message %s has empty body.content. Raw body node: %r",
+                    msg.get("id"),
+                    msg['body']
+                )
                 continue
             mid = msg.get("id")
             if mid in done:
-                continue
-
-            # skip any message where Graph didn’t return a body
-            body_node = msg.get("body", {})
-            text = body_node.get("content")
-            if not text:
-                logger.warning(f"Skipping message {msg.get('id')}—no body")
                 continue
 
             try:
