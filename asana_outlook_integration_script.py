@@ -227,6 +227,10 @@ def main():
         msgs = data.get("value", [])
 
         for msg in msgs:
+            # Skip any message where Graph didn’t return a body field
+            if 'body' not in msg:
+                logger.warning(f"Skipping message {msg.get('id')}\u2014no body returned")
+                continue
             mid = msg.get("id")
             if mid in done:
                 continue
