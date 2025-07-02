@@ -191,16 +191,24 @@ def process_message(msg, tasks_api, attach_api, sections_api, location, job_num,
     gid = task.get("gid")
 
     # Add the task to the chosen section
-    sections_api.add_task_for_section(
-        section_gid,
-        {
-            "body": {
-                "data": {
-                    "task": gid
+    try:
+        sections_api.add_task_for_section(
+            section_gid,
+            {
+                "body": {
+                    "data": {
+                        "task": gid
+                    }
                 }
             }
-        }
-    )
+        )
+    except Exception as e:
+        logger.error(
+            "Failed to add task %s to section %s: %s",
+            gid,
+            section_gid,
+            e,
+        )
 
     # update custom fields
     update_payload = {
@@ -248,6 +256,16 @@ def main():
     token = get_access_token()
     done = load_processed_ids(PROCESSED_IDS_FILE)
     tasks_api, attach_api, sections_api = connect_asana(ASANA_PAT)
+
+    # diagnostics: dump all sections for this project
+    all_secs = sections_api.get_sections_for_project(
+        ASANA_PROJECT_GID,
+        {"opt_fields": "gid,name"}
+    )
+    logger.info(
+        "Project sections available: %r",
+        [(s["gid"], s["name"]) for s in all_secs]
+    )
 
     fid = get_target_folder_id(token, MAIL_FOLDER_PATH)
     # ask Microsoft Graph to include id, subject, body, and date on each message
