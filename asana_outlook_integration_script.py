@@ -11,6 +11,7 @@ import sys
 import msal
 import requests
 import logging
+from bs4 import BeautifulSoup
 import ast
 from dotenv import load_dotenv
 try:
@@ -45,6 +46,9 @@ ASANA_PAT             = os.getenv("ASANA_PAT")
 ASANA_WORKSPACE_GID   = os.getenv("ASANA_WORKSPACE_GID")
 ASANA_PROJECT_GID     = os.getenv("ASANA_PROJECT_GID")
 ASANA_SECTION_GID     = os.getenv("ASANA_SECTION_GID")
+BUDGET_SECTION_GID    = os.getenv("BUDGET_SECTION_GID")
+QUOTE_SECTION_GID     = os.getenv("QUOTE_SECTION_GID")
+ORDER_SECTION_GID     = os.getenv("ORDER_SECTION_GID")
 
 PROCESSED_IDS_FILE    = "processed_ids.txt"
 TEMP_DIR              = "temp_attachments"
@@ -138,26 +142,44 @@ def process_message(msg, tasks_api, attach_api, sections_api, location, job_num,
     body_node = msg.get("body")
     logger.debug("Body node for message %s: %r", msg.get("id"), body_node)
     if isinstance(body_node, dict):
-        if 'content' not in body_node:
+        if "content" not in body_node:
             logger.error(
                 "Message %s: 'body' missing 'content' key. Available body keys: %r",
-                msg.get('id'), list(body_node.keys())
+                msg.get("id"),
+                list(body_node.keys()),
             )
         body = body_node.get("content", "")
     else:
         preview = msg.get("bodyPreview")
         logger.debug(
-            "Using bodyPreview for message %s: %r", msg.get('id'), preview
+            "Using bodyPreview for message %s: %r", msg.get("id"), preview
         )
         body = preview or ""
+
+    # Sanitize HTML bodies to plain text
+    if body.lstrip().startswith("<"):
+        soup = BeautifulSoup(body, "html.parser")
+        clean_body = soup.get_text(separator="\n").strip()
+    else:
+        clean_body = body.strip()
 
     notes = (
         f"**Location:** {location}\n"
         f"**Job #:** {job_num}\n"
         f"**From:** {sender}\n"
         f"**Received:** {received}\n\n"
-        f"{body}"
+        f"{clean_body}"
     )
+
+    subject_lower = subj.lower()
+    if "budget" in subject_lower and BUDGET_SECTION_GID:
+        section_gid = BUDGET_SECTION_GID
+    elif "quotation" in subject_lower and QUOTE_SECTION_GID:
+        section_gid = QUOTE_SECTION_GID
+    elif "order confirmation" in subject_lower and ORDER_SECTION_GID:
+        section_gid = ORDER_SECTION_GID
+    else:
+        section_gid = ASANA_SECTION_GID
 
     task_payload = {
         "name": subj,
@@ -168,9 +190,9 @@ def process_message(msg, tasks_api, attach_api, sections_api, location, job_num,
     task = tasks_api.create_task({"data": task_payload}, {})
     gid = task.get("gid")
 
-    # add to section without extra opts
+    # Add the task to the chosen section
     sections_api.add_task_for_section(
-        ASANA_SECTION_GID,
+        section_gid,
         {"data": {"task": gid}}
     )
 
