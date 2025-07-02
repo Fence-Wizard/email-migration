@@ -193,7 +193,13 @@ def process_message(msg, tasks_api, attach_api, sections_api, location, job_num,
     # Add the task to the chosen section
     sections_api.add_task_for_section(
         section_gid,
-        {"data": {"task": gid}}
+        {
+            "body": {
+                "data": {
+                    "task": gid
+                }
+            }
+        }
     )
 
     # update custom fields
