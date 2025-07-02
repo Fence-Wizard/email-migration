@@ -207,13 +207,16 @@ def main():
 
     fid = get_target_folder_id(token, MAIL_FOLDER_PATH)
     headers = {"Authorization": f"Bearer {token}"}
-    url = (
-        f"{GRAPH_BASE}/users/{MAIL_USER}/mailFolders/{fid}/messages?"
-        f"$select=id,subject,receivedDateTime,from,body,parentFolderId&$expand=attachments"
-    )
+    params = {
+        "$select": "id,subject,body,receivedDateTime,from,parentFolderId",
+        "$expand": "attachments",
+        "$top": 50,
+    }
+    url = f"{GRAPH_BASE}/users/{MAIL_USER}/mailFolders/{fid}/messages"
     next_url = url
     while next_url:
-        resp = requests.get(next_url, headers=headers)
+        resp = requests.get(next_url, headers=headers,
+                           params=params if next_url == url else None)
         try:
             resp.raise_for_status()
         except HTTPError as err:
@@ -226,6 +229,13 @@ def main():
             mid = msg.get("id")
             if mid in done:
                 continue
+
+            body_node = msg.get("body", {})
+            text = body_node.get("content") if isinstance(body_node, dict) else None
+            if not text:
+                logger.warning(f"Skipping {mid}—no body")
+                continue
+
             try:
                 loc = MAIL_FOLDER_PATH[-2]
                 job = MAIL_FOLDER_PATH[-1]
