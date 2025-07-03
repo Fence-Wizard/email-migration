@@ -280,79 +280,77 @@ def main():
         [(s["gid"], s["name"]) for s in all_secs]
     )
 
-    fid = get_target_folder_id(token, MAIL_FOLDER_PATH)
-    # ask Microsoft Graph to include id, subject, body, and date on each message
-    headers = {"Authorization": f"Bearer {token}"}
-    params = {
-        "$select": "id,subject,body,receivedDateTime,from,parentFolderId",
-        "$expand": "attachments",
-        "$top": 50,
-    }
-    url = f"{GRAPH_BASE}/users/{MAIL_USER}/mailFolders/{fid}/messages"
-    next_url = url
-    while next_url:
-        req_params = params if next_url == url else None
-        logger.debug(
-            "Graph GET %s with params: %s", next_url, req_params)
-        resp = requests.get(next_url, headers=headers, params=req_params)
-        try:
-            resp.raise_for_status()
-        except HTTPError as err:
-            logger.error("Request failed: %s", err)
-            break
-        data = resp.json()
-        logger.debug(
-            "Raw Graph response sample: %r",
-            data.get("value", [])[:2]
-        )
-        msgs = data.get("value", [])
-        logger.debug(
-            "Graph returned %d messages; keys of first 3: %r",
-            len(msgs),
-            [list(m.keys()) for m in msgs[:3]]
-        )
+    # ─── FULL RUN: iterate every subfolder of Inbox/2024 Jobs ───
+    # 1) Find the base folder ID for ["Inbox", "2024 Jobs"]
+    base_path = MAIL_FOLDER_PATH[:2]
+    base_fid  = get_target_folder_id(token, base_path)
 
-        for msg in msgs:
-            # --- DEBUG: inspect each msg before processing ---
-            logger.debug(
-                "Inspecting message %s: keys=%r",
-                msg.get("id"),
-                list(msg.keys())
-            )
-            if 'body' not in msg:
-                logger.warning(
-                    "Skipping message %s—no 'body' key. Available keys: %s",
-                    msg.get("id"),
-                    list(msg.keys())
-                )
-                continue
-            content = msg['body'].get('content')
-            if not content:
-                logger.warning(
-                    "Message %s has empty body.content. Raw body node: %r",
-                    msg.get("id"),
-                    msg['body']
-                )
-                continue
-            mid = msg.get("id")
-            if mid in done:
-                continue
+    # 2) Recursively collect all folder IDs under that base
+    def collect_folder_ids(folder_id):
+        ids = [folder_id]
+        child_url = f"{GRAPH_BASE}/users/{MAIL_USER}/mailFolders/{folder_id}/childFolders"
+        r = requests.get(child_url, headers={"Authorization": f"Bearer {token}"})
+        r.raise_for_status()
+        for child in r.json().get("value", []):
+            ids.extend(collect_folder_ids(child["id"]))
+        return ids
 
+    folder_ids = collect_folder_ids(base_fid)
+
+    # 3) Map each folder ID back to its displayName path so we can extract loc/job
+    folder_paths = {}
+    def map_paths(path_so_far, folder_id):
+        folder_paths[folder_id] = path_so_far
+        url = f"{GRAPH_BASE}/users/{MAIL_USER}/mailFolders/{folder_id}/childFolders"
+        resp = requests.get(url, headers={"Authorization": f"Bearer {token}"})
+        resp.raise_for_status()
+        for child in resp.json().get("value", []):
+            map_paths(path_so_far + [child["displayName"]], child["id"])
+
+    map_paths(base_path, base_fid)
+
+    # 4) Loop through each folder, paging through messages exactly as before
+    for fid in folder_ids:
+        path = folder_paths.get(fid, [])
+        # derive location/job if path depth >= 4: ["Inbox","2024 Jobs", LOC, JOB#]
+        if len(path) >= 4:
+            loc, job = path[-2], path[-1]
+        else:
+            loc = job = ""
+
+        headers = {"Authorization": f"Bearer {token}"}
+        params  = {
+            "$select" : "id,subject,body,receivedDateTime,from,parentFolderId",
+            "$expand" : "attachments",
+            "$top"    : 50,
+        }
+        next_url = f"{GRAPH_BASE}/users/{MAIL_USER}/mailFolders/{fid}/messages"
+
+        while next_url:
+            resp = requests.get(next_url, headers=headers, params=params if next_url.endswith("/messages") else None)
             try:
-                loc = MAIL_FOLDER_PATH[-2]
-                job = MAIL_FOLDER_PATH[-1]
-                process_message(msg, tasks_api, attach_api, sections_api, loc, job, token)
-                save_processed_id(PROCESSED_IDS_FILE, mid)
-            except Exception as e:
-                # emit full stack trace and raw message for post-mortem
-                logger.exception(
-                    "Error processing message %s; raw payload: %r", mid, msg
-                )
-            time.sleep(SLEEP_INTERVAL)
+                resp.raise_for_status()
+            except HTTPError as err:
+                logger.error("Request failed for folder %s: %s", fid, err)
+                break
 
-        next_url = data.get("@odata.nextLink")
+            data = resp.json()
+            for msg in data.get("value", []):
+                if 'body' not in msg:
+                    continue
+                mid = msg["id"]
+                if mid in done:
+                    continue
+                try:
+                    process_message(msg, tasks_api, attach_api, sections_api, loc, job, token)
+                    save_processed_id(PROCESSED_IDS_FILE, mid)
+                except Exception:
+                    logger.exception("Error processing message %s", mid)
+                time.sleep(SLEEP_INTERVAL)
 
-    logger.info("✅ Dry-run complete.")
+            next_url = data.get("@odata.nextLink")
+
+    logger.info("\u2705 Full run complete over all subfolders of 2024 Jobs.")
 
 
 def _matrix_effect(stop_event):
