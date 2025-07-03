@@ -1,41 +1,46 @@
-import sys, io, traceback
+import sys
+import io
+import traceback
 from colorama import init as _colorama_init, Fore
 from asana_outlook_integration_script import main as run
 
 _colorama_init()
 
 class BinaryWriter:
-    """Wraps a real stream, writing every incoming chunk as green 8-bit binary."""
-    def __init__(self, real):
-        self.real = real
-    def write(self, s):
-        if not s:
-            return
-        # Convert each character to binary and output in green
-        bits = " ".join(format(ord(ch), "08b") for ch in s)
-        self.real.write(Fore.GREEN + bits + "\n")
+    """Captures text and streams it live as green 8-bit binary, one bit per line."""
+    def __init__(self, real_stream):
+        self.real = real_stream
+        self.buffer = io.StringIO()
+
+    def write(self, text: str):
+        # record for later replay
+        self.buffer.write(text)
+        for ch in text:
+            bits = format(ord(ch), "08b")
+            for bit in bits:
+                self.real.write(Fore.GREEN + bit + "\n")
+        self.real.flush()
+
     def flush(self):
         self.real.flush()
 
+
 def main_wrapper():
-    # Swap out stdout/stderr for live binary streaming
-    old_out, old_err = sys.stdout, sys.stderr
-    bin_out = BinaryWriter(old_out)
-    sys.stdout = sys.stderr = bin_out
+    real_out = sys.stdout
+    bw = BinaryWriter(real_out)
+    sys.stdout = sys.stderr = bw
+
     try:
-        print("Starting main.py execution")
+        print("Starting main.py execution\n")
         run()
-        print("Script completed")
+        print("\nScript completed\n")
     except Exception:
         traceback.print_exc()
     finally:
-        sys.stdout, sys.stderr = old_out, old_err
+        sys.stdout = sys.stderr = real_out
 
-    # restore real streams, capture traceback if any
-    sys.stdout, sys.stderr = old_out, old_err
-    print("\n\n=== Run complete. Final logs / traceback below ===\n")
-    # Now replay the captured text so you can read it
-    print(bin_out.real.getvalue() if hasattr(bin_out.real, "getvalue") else "")
+    print("\n=== Original output below ===\n")
+    print(bw.buffer.getvalue())
 
 if __name__ == "__main__":
     main_wrapper()
