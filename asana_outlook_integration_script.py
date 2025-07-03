@@ -254,7 +254,11 @@ def process_message(msg, tasks_api, attach_api, sections_api, location, job_num,
         with open(local, "wb") as f:
             f.write(r.content)
         with open(local, "rb") as f:
-            attach_api.create_attachment_on_task(gid, f, {})
+            attach_api.create_attachment_for_object(
+                "tasks",
+                gid,
+                {"file": f}
+            )
         os.remove(local)
 
 
