@@ -11,10 +11,6 @@ import sys
 import msal
 import requests
 import logging
-import random
-import threading
-import traceback
-from io import StringIO
 from bs4 import BeautifulSoup
 import ast
 from dotenv import load_dotenv
@@ -351,35 +347,5 @@ def main():
     logger.info("✅ Dry-run complete.")
 
 
-def _matrix_effect(stop_event):
-    """Print random binary lines until stop_event is set."""
-    width = 80
-    while not stop_event.is_set():
-        print("".join(random.choice("01") for _ in range(width)))
-        time.sleep(0.05)
-    if os.name == "nt":
-        os.system("cls")
-    else:
-        os.system("clear")
-
-
 if __name__ == "__main__":
-    tb_buf = StringIO()
-    stop_evt = threading.Event()
-    mat_thread = threading.Thread(target=_matrix_effect, args=(stop_evt,), daemon=True)
-    mat_thread.start()
-
-    try:
-        main()
-    except Exception:
-        tb_buf.write(traceback.format_exc())
-    finally:
-        stop_evt.set()
-        mat_thread.join()
-
-    tb_text = tb_buf.getvalue()
-    if tb_text:
-        print("\n\n=== Traceback (most recent call last) ===\n")
-        sys.stdout.write(tb_text)
-    else:
-        print("\n\n\u2714 Migration completed without unhandled exceptions.\n")
+    main()
