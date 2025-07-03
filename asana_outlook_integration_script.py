@@ -220,12 +220,9 @@ def process_message(msg, tasks_api, attach_api, sections_api, location, job_num,
         JOB_NUMBER_FIELD_GID: int(job_num)
     }
     tasks_api.update_task(
+        {"data": update_payload},
         gid,
-        {
-            "body": {
-                "data": update_payload
-            }
-        }
+        {}
     )
 
     # handle attachments
