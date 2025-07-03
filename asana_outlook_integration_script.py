@@ -255,10 +255,12 @@ def process_message(msg, tasks_api, attach_api, sections_api, location, job_num,
         with open(local, "wb") as f:
             f.write(r.content)
         with open(local, "rb") as f:
-            attach_api.create_attachment_for_object(
+            # Use the HTTP-info version which accepts (object_type, object_gid, opts, **kwargs)
+            attach_api.create_attachment_for_object_with_http_info(
                 "tasks",
                 gid,
-                {"file": f}
+                {"file": f},
+                {}
             )
         os.remove(local)
 
