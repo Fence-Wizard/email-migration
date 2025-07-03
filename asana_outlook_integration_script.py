@@ -349,11 +349,23 @@ def main():
 
 
 def _matrix_effect(stop_event):
-    """Print random binary lines until stop_event is set."""
-    width = 80
+    """Print a vertical stream of binary digits (Matrix rain) until stopped."""
+    try:
+        # get terminal width if available
+        import shutil
+        width = shutil.get_terminal_size().columns
+    except Exception:
+        width = 80
+
     while not stop_event.is_set():
-        print("".join(random.choice("01") for _ in range(width)))
+        # build an empty line and drop a bit at a random column
+        line = [" " for _ in range(width)]
+        col = random.randrange(width)
+        line[col] = random.choice("01")
+        print("".join(line))
         time.sleep(0.05)
+
+    # clear the screen at the end
     if os.name == "nt":
         os.system("cls")
     else:
