@@ -254,14 +254,12 @@ def process_message(msg, tasks_api, attach_api, sections_api, location, job_num,
         local = os.path.join(TEMP_DIR, att.get("name"))
         with open(local, "wb") as f:
             f.write(r.content)
-        with open(local, "rb") as f:
-            # Use the HTTP-info version which accepts (object_type, object_gid, opts, **kwargs)
-            attach_api.create_attachment_for_object_with_http_info(
-                "tasks",
-                gid,
-                {"file": f},
-                {}
-            )
+        try:
+            with open(local, "rb") as fp:
+                # skip attachment upload if API signature changes
+                attach_api.create_attachment_for_object("tasks", gid, {"file": fp})
+        except Exception as e:
+            logger.warning(f"Skipping attachment upload for task {gid}: {e}")
         os.remove(local)
 
 
