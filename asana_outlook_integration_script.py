@@ -13,11 +13,12 @@ import requests
 import logging
 import random
 import threading
+import io
 import traceback
-from io import StringIO
 from bs4 import BeautifulSoup
 import ast
 from dotenv import load_dotenv
+from colorama import init as _colorama_init, Fore
 try:
     import asana
 except ImportError:
@@ -377,22 +378,30 @@ def _matrix_effect(stop_event):
 
 
 if __name__ == "__main__":
-    tb_buf = StringIO()
-    stop_evt = threading.Event()
-    mat_thread = threading.Thread(target=_matrix_effect, args=(stop_evt,), daemon=True)
-    mat_thread.start()
+    # initialize colorama for ANSI support in Powershell
+    _colorama_init()
 
+    # Capture all stdout/stderr during run
+    old_out, old_err = sys.stdout, sys.stderr
+    buffer = io.StringIO()
+    sys.stdout = buffer
+    sys.stderr = buffer
     try:
         main()
     except Exception:
-        tb_buf.write(traceback.format_exc())
+        buffer.write(traceback.format_exc())
     finally:
-        stop_evt.set()
-        mat_thread.join()
+        # restore real stdout/stderr
+        sys.stdout, sys.stderr = old_out, old_err
 
-    tb_text = tb_buf.getvalue()
-    if tb_text:
-        print("\n\n=== Traceback (most recent call last) ===\n")
-        sys.stdout.write(tb_text)
-    else:
-        print("\n\n\u2714 Migration completed without unhandled exceptions.\n")
+    # Grab the text that was generated
+    output = buffer.getvalue()
+
+    # Convert each character to 8-bit binary
+    binary = " ".join(format(ord(ch), "08b") for ch in output)
+
+    # Print the binary dump in green
+    print(Fore.GREEN + binary)
+
+    # Then print the original output (traceback or success)
+    print(output)
