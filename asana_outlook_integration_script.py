@@ -352,11 +352,12 @@ def main():
 
 
 def _matrix_effect(stop_event):
-    """Print random binary lines until stop_event is set."""
-    width = 80
+    """Print a vertical stream of random binary digits until stop_event is set."""
     while not stop_event.is_set():
-        print("".join(random.choice("01") for _ in range(width)))
+        # print one binary digit per line to simulate vertical rain
+        print(random.choice("01"))
         time.sleep(0.05)
+    # clear the screen when done
     if os.name == "nt":
         os.system("cls")
     else:
