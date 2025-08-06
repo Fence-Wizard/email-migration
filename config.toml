@@ -5,6 +5,7 @@ tenant_id = "YOUR_AZURE_TENANT_ID"
 username = "YOUR_AZURE_USERNAME"
 password = "YOUR_AZURE_PASSWORD"
 base_url = "https://graph.microsoft.com/v1.0"
+auth_mode = "app"
 
 [analysis]
 top_n = 5
