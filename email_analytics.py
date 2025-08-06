@@ -121,8 +121,9 @@ def fetch_inbox_messages():
     # Page through "2024 Jobs" folder messages
     initial_url = f"{GRAPH_BASE}/users/{USERNAME}/mailFolders/{root_id}/messages"
     # don't select full body here (unsupported on list call) - fetch per message
+    # only select fields supported on a list call; drop inReplyTo
     initial_params = {
-        "$select": "id,subject,from,receivedDateTime,bodyPreview,conversationId,inReplyTo,parentFolderId",
+        "$select": "id,subject,from,receivedDateTime,bodyPreview,conversationId,parentFolderId",
         "$top": 50,
     }
     all_msgs = []
@@ -146,8 +147,9 @@ def fetch_inbox_messages():
             m["location"] = path[2] if len(path) > 2 else ""
             m["job_num"] = path[3] if len(path) > 3 else ""
 
+            # thread info: Graph messages have a 'replyTo' array, not inReplyTo
             m["thread_id"] = m.get("conversationId")
-            m["reply_to"] = m.get("inReplyTo")
+            m["reply_to"] = m.get("replyTo", [])
 
             # retrieve the full body content for each message
             body_url = f"{GRAPH_BASE}/users/{USERNAME}/messages/{m['id']}?$select=body"
