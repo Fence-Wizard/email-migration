@@ -19,6 +19,9 @@ Modernized PhD-level email analytics pipeline:
 
 import asyncio
 import os
+from dotenv import load_dotenv
+load_dotenv()  # make os.getenv() read .env immediately
+
 import toml
 import structlog
 import msal
@@ -106,12 +109,13 @@ def main():
         logger.warning("config.toml not found or invalid; falling back to .env settings")
         cfg = {
             "graph": {
-                "client_id": os.getenv("AZ_CLIENT_ID"),
-                "client_secret": os.getenv("AZ_CLIENT_SECRET"),
-                "tenant_id": os.getenv("AZ_TENANT_ID"),
-                "username": os.getenv("AZ_USERNAME"),
-                "password": os.getenv("AZ_PASSWORD"),
-                "base_url": os.getenv("AZ_BASE_URL", "https://graph.microsoft.com/v1.0"),
+                # try AZ_*, otherwise fall back to your existing names
+                "client_id":     os.getenv("AZ_CLIENT_ID")     or os.getenv("CLIENT_ID"),
+                "client_secret": os.getenv("AZ_CLIENT_SECRET") or os.getenv("CLIENT_SECRET"),
+                "tenant_id":     os.getenv("AZ_TENANT_ID")     or os.getenv("TENANT_ID"),
+                "username":      os.getenv("AZ_USERNAME")      or os.getenv("MAIL_USER"),
+                "password":      os.getenv("AZ_PASSWORD")      or os.getenv("MAIL_PASSWORD"),
+                "base_url":      os.getenv("AZ_BASE_URL", "https://graph.microsoft.com/v1.0"),
             },
             "analysis": {
                 "top_n": int(os.getenv("ANALYSIS_TOP_N", "5")),
