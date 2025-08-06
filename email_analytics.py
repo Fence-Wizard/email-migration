@@ -21,6 +21,7 @@ import asyncio
 import os
 import toml
 import structlog
+import msal
 from tenacity import retry, stop_after_attempt, wait_exponential
 from httpx import AsyncClient, HTTPError
 from pydantic import BaseModel
@@ -58,9 +59,33 @@ async def async_paginate(client: AsyncClient, url: str, params: dict):
         params = {}
     return items
 
+def acquire_token(graph_cfg: dict) -> str:
+    """Obtain an OAuth access token for Microsoft Graph."""
+    authority = f"https://login.microsoftonline.com/{graph_cfg['tenant_id']}"
+    scopes = ["https://graph.microsoft.com/.default"]
+    if graph_cfg.get('username') and graph_cfg.get('password'):
+        app = msal.PublicClientApplication(graph_cfg['client_id'], authority=authority)
+        result = app.acquire_token_by_username_password(
+            graph_cfg['username'],
+            graph_cfg['password'],
+            scopes=scopes,
+        )
+    else:
+        app = msal.ConfidentialClientApplication(
+            graph_cfg['client_id'],
+            authority=authority,
+            client_credential=graph_cfg['client_secret'],
+        )
+        result = app.acquire_token_for_client(scopes=scopes)
+    if 'access_token' not in result:
+        raise RuntimeError(f"Token acquisition failed: {result.get('error_description')}")
+    return result['access_token']
+
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=2, max=10))
 async def fetch_inbox(config: dict) -> List[EmailMessage]:
-    async with AsyncClient(base_url=config['graph']['base_url']) as client:
+    token = acquire_token(config['graph'])
+    headers = {"Authorization": f"Bearer {token}"}
+    async with AsyncClient(base_url=config['graph']['base_url'], headers=headers) as client:
         raw = await async_paginate(client, '/me/mailFolders/Inbox/messages', {'$top':50})
     return [
         EmailMessage(
