@@ -176,6 +176,7 @@ df["receivedDateTime"] = pd.to_datetime(df["receivedDateTime"])
 df = df[[
     "id",
     "subject",
+    "from",
     "sender",
     "receivedDateTime",
     "bodyPreview",
