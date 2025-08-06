@@ -1,273 +1,98 @@
 import os
-import json
-import sys
-import time
-import random
-import threading
-import shutil
-import requests
+import asyncio
 import msal
 import pandas as pd
-import matplotlib.pyplot as plt
-from textblob import TextBlob
-from sklearn.decomposition import LatentDirichletAllocation
-from sklearn.feature_extraction.text import CountVectorizer
+import structlog
 from dotenv import load_dotenv
-from io import BytesIO
-from datetime import datetime
-import openpyxl
-import pytesseract
-from PIL import Image
 
-try:
-    from pdfminer.high_level import extract_text_to_fp
-    _HAS_PDFMINER = True
-except ImportError:  # pragma: no cover - optional dependency
-    _HAS_PDFMINER = False
-    extract_text_to_fp = None
+from models import EmailMessage
 
-try:
-    from docx import Document
-    _HAS_DOCX = True
-except ImportError:  # pragma: no cover - optional dependency
-    _HAS_DOCX = False
-    Document = None
+import httpx
+from tenacity import AsyncRetrying, retry_if_exception_type, wait_exponential, stop_after_attempt
+from transformers import pipeline
+from pymdptoolbox.mdp import ValueIteration
 
 
-def _matrix_rain(stop_event):
-    """Continuously print green Matrix-style text until stop_event is set."""
-    chars = "abcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()"
-    width = shutil.get_terminal_size((80, 20)).columns
-    while not stop_event.is_set():
-        line = "".join(random.choice(chars) for _ in range(width))
-        sys.stdout.write("\033[32m" + line + "\033[0m\n")
-        sys.stdout.flush()
-        time.sleep(0.05)
+load_dotenv()
+structlog.configure(processors=[structlog.processors.JSONRenderer()])
+logger = structlog.get_logger()
 
 
-_stop_matrix = threading.Event()
-_matrix_thread = threading.Thread(target=_matrix_rain, args=(_stop_matrix,), daemon=True)
-_matrix_thread.start()
-
-# ─── Config & Auth ─────────────────────────────────────────────────────────────────────────
-load_dotenv()  # expects .env with CLIENT_ID, TENANT_ID, CLIENT_SECRET
-
-CLIENT_ID     = os.getenv("CLIENT_ID")
+CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
-TENANT_ID     = os.getenv("TENANT_ID")
-USERNAME      = "tmyers@hurricanefence.com"
-SCOPES        = ["https://graph.microsoft.com/.default"]
-AUTHORITY     = f"https://login.microsoftonline.com/{TENANT_ID}"
+TENANT_ID = os.getenv("TENANT_ID")
+USERNAME = os.getenv("USERNAME", "tmyers@hurricanefence.com")
+SCOPES = ["https://graph.microsoft.com/.default"]
+AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
 
 app = msal.ConfidentialClientApplication(
-    CLIENT_ID,
-    authority=AUTHORITY,
-    client_credential=CLIENT_SECRET
+    CLIENT_ID, authority=AUTHORITY, client_credential=CLIENT_SECRET
 )
 token = app.acquire_token_for_client(SCOPES)["access_token"]
-HEADERS = {"Authorization": f"Bearer {token}"}
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
-
-# ─── Locate root folder "2024 Jobs" and map IDs to paths ──────────
-
-def find_root_folder(name: str) -> str:
-    """Recursively search Inbox's child folders for *name* and return its ID."""
-    # 1) Retrieve Inbox folder ID
-    inbox_resp = requests.get(
-        f"{GRAPH_BASE}/users/{USERNAME}/mailFolders/Inbox", headers=HEADERS
-    )
-    inbox_resp.raise_for_status()
-    inbox_id = inbox_resp.json()["id"]
-
-    def recurse(parent_id: str):
-        """Depth-first search through child folders."""
-        url = f"{GRAPH_BASE}/users/{USERNAME}/mailFolders/{parent_id}/childFolders"
-        r = requests.get(url, headers=HEADERS)
-        r.raise_for_status()
-        for child in r.json().get("value", []):
-            if child.get("displayName") == name:
-                return child["id"]
-            found = recurse(child["id"])
-            if found:
-                return found
-        return None
-
-    result = recurse(inbox_id)
-    if not result:
-        raise RuntimeError(f"Folder named '{name}' not found under Inbox.")
-    return result
-
-ROOT_NAME = "2024 Jobs"
-root_id = find_root_folder(ROOT_NAME)
-
-folder_paths = {}
+HEADERS = {"Authorization": f"Bearer {token}"}
 
 
-def map_paths(path, fid):
-    folder_paths[fid] = path
-    url = f"{GRAPH_BASE}/users/{USERNAME}/mailFolders/{fid}/childFolders"
-    resp = requests.get(url, headers=HEADERS)
-    resp.raise_for_status()
-    for child in resp.json().get("value", []):
-        map_paths(path + [child["displayName"]], child["id"])
+sentiment_analyzer = pipeline("sentiment-analysis", truncation=True)
 
 
-map_paths([ROOT_NAME], root_id)
+def analyze_sentiment(text: str) -> float:
+    if not text:
+        return 0.0
+    result = sentiment_analyzer(text[:512])[0]
+    return result["score"] if result["label"].startswith("POS") else -result["score"]
 
-# ─── Fetch messages from the "2024 Jobs" folder ───────────────────
 
-
-def fetch_inbox_messages():
-    # Page through "2024 Jobs" folder messages
-    initial_url = f"{GRAPH_BASE}/users/{USERNAME}/mailFolders/{root_id}/messages"
-    # don't select full body here (unsupported on list call) - fetch per message
-    # only select fields supported on a list call; drop inReplyTo
-    initial_params = {
-        "$select": "id,subject,from,receivedDateTime,bodyPreview,conversationId,parentFolderId",
+async def fetch_messages_from_folder(folder_id: str):
+    url = f"{GRAPH_BASE}/users/{USERNAME}/mailFolders/{folder_id}/messages"
+    params = {
+        "$select": "id,subject,from,receivedDateTime,body,conversationId,parentFolderId",
         "$top": 50,
     }
-    all_msgs = []
-    next_link = initial_url
-    first_call = True
-
-    while next_link:
-        params = initial_params if first_call else None
-        # ─── DEBUG: log the folder, URL, params and response details ────────────────
-        print(f"DEBUG: Fetching messages from folder_id={root_id}")
-        print(f"DEBUG: GET {next_link} with params={params}")
-        resp = requests.get(next_link, headers=HEADERS, params=params)
-        print(f"DEBUG: HTTP status {resp.status_code}")
-        data = resp.json()
-        print(f"DEBUG: response keys: {list(data.keys())}")
-        print(f"DEBUG: number of messages received: {len(data.get('value', []))}")
-        resp.raise_for_status()
-        first_call = False
-        for m in data.get("value", []):
-            fid = m.get("parentFolderId")
-            path = folder_paths.get(fid, [])
-            m["year"] = path[1] if len(path) > 1 else ""
-            m["location"] = path[2] if len(path) > 2 else ""
-            m["job_num"] = path[3] if len(path) > 3 else ""
-
-            # thread info: Graph messages have a 'replyTo' array, not inReplyTo
-            m["thread_id"] = m.get("conversationId")
-            m["reply_to"] = m.get("replyTo", [])
-
-            # retrieve the full body content for each message
-            body_url = f"{GRAPH_BASE}/users/{USERNAME}/messages/{m['id']}?$select=body"
-            body_resp = requests.get(body_url, headers=HEADERS)
-            body_resp.raise_for_status()
-            m["body_content"] = body_resp.json().get("body", {}).get("content", "")
-
-            # fetch attachments metadata
-            att_url = f"{GRAPH_BASE}/users/{USERNAME}/messages/{m['id']}/attachments"
-            att_resp = requests.get(att_url, headers=HEADERS)
-            att_resp.raise_for_status()
-            m["attachments"] = att_resp.json().get("value", [])
-
-            # extract the sender address into its own field
-            m["sender"] = (
-                m.get("from", {})
-                .get("emailAddress", {})
-                .get("address", "")
-            )
-
-            all_msgs.append(m)
-        next_link = data.get("@odata.nextLink")
-
-    return all_msgs
-
-# ─── Build DataFrame ─────────────────────────────────────────────────────────────────────────
-msgs = fetch_inbox_messages()
-df = pd.DataFrame(msgs)
-# DEBUG: print available columns and sample rows to diagnose missing fields
-print("Columns available:", df.columns.tolist())
-print(df.head(3))
-# Ensure column exists before converting to datetime
-if "receivedDateTime" in df.columns:
-    df["receivedDateTime"] = pd.to_datetime(df["receivedDateTime"])
-else:
-    raise KeyError("Expected column 'receivedDateTime' not found in DataFrame")
-df = df[[
-    "id","subject","sender","receivedDateTime","bodyPreview","body_content",
-    "thread_id","reply_to","year","location","job_num","attachments"
-]]
-
-# ─── Extract attachment text ────────────────────────────────────────────────────
-def extract_attachment_text(att):
-    url = att.get("@odata.mediaReadLink")
-    if not url:
-        return ""
-    resp = requests.get(url, headers=HEADERS)
+    async with httpx.AsyncClient() as client:
+        async for attempt in AsyncRetrying(
+            retry=retry_if_exception_type(httpx.HTTPError),
+            wait=wait_exponential(min=1, max=10),
+            stop=stop_after_attempt(3),
+        ):
+            with attempt:
+                resp = await client.get(url, headers=HEADERS, params=params)
     resp.raise_for_status()
-    buf = BytesIO(resp.content)
-    name = att.get("name", "").lower()
-    if name.endswith(".pdf") and _HAS_PDFMINER:
-        out = BytesIO()
-        extract_text_to_fp(buf, out)
-        return out.getvalue().decode(errors="ignore")
-    if name.endswith(".docx") and _HAS_DOCX:
-        doc = Document(buf)
-        return "\n".join(p.text for p in doc.paragraphs)
-    if name.endswith(".xlsx"):
-        wb = openpyxl.load_workbook(buf, data_only=True)
-        texts = []
-        for sheet in wb.worksheets:
-            for row in sheet.iter_rows(values_only=True):
-                texts.append(" ".join(str(c) for c in row if c is not None))
-        return "\n".join(texts)
-    if any(name.endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"]):
-        img = Image.open(buf)
-        return pytesseract.image_to_string(img)
-    return ""
+    data = resp.json()
+    for raw in data.get("value", []):
+        yield EmailMessage.parse_obj(raw)
 
-df["attachment_text"] = df["attachments"].apply(
-    lambda atts: "\n---\n".join(extract_attachment_text(a) for a in (atts or []))
-)
 
-# ─── Combine for full-text analysis ─────────────────────────────────────────────
-df["full_text"] = df["body_content"].fillna("") + "\n\n" + df["attachment_text"].fillna("")
+def analyze_pipeline(df: pd.DataFrame) -> pd.DataFrame:
+    df["full_text"] = df["body"].apply(lambda b: b.get("content", ""))
+    df["sentiment"] = df["full_text"].apply(analyze_sentiment)
+    return df
 
-# ─── 1. Basic Descriptives ────────────────────────────────────────────────────────────────────────
-print(f"Total messages: {len(df)}")
-print("Top 5 senders:\n", df["sender"].value_counts().head())
 
-# ─── 2. Time Series Plot ────────────────────────────────────────────────────────────────────────
+async def main():
+    folder_id = os.getenv("MAIL_FOLDER_ID", "Inbox")
+    messages = []
+    async for m in fetch_messages_from_folder(folder_id):
+        messages.append(m.dict())
 
-ts = df.set_index("receivedDateTime").resample("W").size()
-plt.figure()
-ts.plot(title="Emails per Week")
-plt.tight_layout()
-plt.show()
+    df = pd.DataFrame(messages)
+    df = analyze_pipeline(df)
 
-# ─── 3. Sentiment Analysis ────────────────────────────────────────────────────────────────────────
+    n_states = 5
+    n_actions = 2
+    P = [
+        [[1.0 / n_states for _ in range(n_states)] for _ in range(n_states)]
+        for _ in range(n_actions)
+    ]
+    R = [[0.0 for _ in range(n_states)] for _ in range(n_actions)]
+    vi = ValueIteration(P, R, discount=0.95)
+    vi.run()
+    policy = vi.policy
+    logger.info("Computed optimal policy", policy=policy.tolist())
 
-df["sentiment"] = df["full_text"].apply(lambda t: TextBlob(t).sentiment.polarity)
-print("Average sentiment:", df["sentiment"].mean())
+    print(df.head())
 
-# ─── 4. Topic Modeling ────────────────────────────────────────────────────────────────────────
-# Vectorize the previews
-vec = CountVectorizer(max_df=0.9, min_df=5, stop_words="english")
-X = vec.fit_transform(df["full_text"].fillna(""))
-lda = LatentDirichletAllocation(n_components=5, random_state=0)
-lda.fit(X)
-terms = vec.get_feature_names_out()
-for idx, topic in enumerate(lda.components_):
-    top_terms = [terms[i] for i in topic.argsort()[-10:]]
-    print(f"Topic {idx+1}: {', '.join(top_terms)}")
 
-# ─── 5. Save to CSV for further analysis ────────────────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    asyncio.run(main())
 
-output_file = "tmyers_inbox_summary.csv"
-try:
-    df.to_csv(output_file, index=False)
-    print(f"Saved summary CSV: {output_file}")
-except PermissionError:
-    # Fallback to home directory with timestamp
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    fallback = os.path.expanduser(f"~/tmyers_inbox_summary_{ts}.csv")
-    df.to_csv(fallback, index=False)
-    print(f"Permission denied on '{output_file}'. Saved to fallback path: {fallback}")
-
-_stop_matrix.set()
-_matrix_thread.join()
