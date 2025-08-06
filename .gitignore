@@ -1,5 +1,6 @@
 # Environment
 .env
+config.toml
 
 # Python artifacts
 __pycache__/

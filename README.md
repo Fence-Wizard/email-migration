@@ -26,11 +26,10 @@ from `.env` (or the path specified by `ENV_FILE`).
 `email_analytics.py` retrieves messages from an Outlook Inbox using the Microsoft Graph API and performs basic analytics such as sender counts, sentiment analysis, and topic modeling.
 
 1. Ensure the dependencies in `requirements.txt` are installed.
-2. Populate `.env` (or `config.toml`) with your Azure AD details. Add `AZ_AUTH_MODE`
-   or `auth_mode` to choose between:
+2. Populate `.env` with your Azure AD details. Add `AZ_AUTH_MODE` to choose between:
    - `app` &mdash; client credential flow using `AZ_CLIENT_SECRET`.
    - `delegated` &mdash; username/password flow using `AZ_USERNAME` and `AZ_PASSWORD`.
-   At minimum the script expects `AZ_CLIENT_ID` and `AZ_TENANT_ID`, plus the
+   At minimum the script expects `CLIENT_ID` and `TENANT_ID`, plus the
    credentials required for the selected mode.
 3. Run the script:
    ```bash

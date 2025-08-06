@@ -10,7 +10,7 @@ Modernized PhD-level email analytics pipeline:
    • async paginate() for @odata.nextLink.
    • tenacity retries with exponential backoff.
 4. Provenance & Reproducibility
-   • config.toml, log Git SHA, checksum requirements.
+   • environment variables, log Git SHA, checksum requirements.
 5. Advanced NLP & Analytical Layer
    • transformers embeddings + HDBSCAN clustering.
 6. Game-Theory & Process Mining
@@ -22,7 +22,6 @@ import os
 import json
 from dotenv import load_dotenv
 
-import toml
 import structlog
 import msal
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -123,42 +122,30 @@ async def fetch_inbox(config: dict, user_id: Optional[str] = None) -> List[Email
     ]
 
 def main():
-    # ------------------------------------------------------------------------
-    # CONFIG LOADING: first try config.toml next to this script; else fall back
-    # ------------------------------------------------------------------------
+    # Load environment variables from a local .env file
     script_dir = os.path.dirname(os.path.realpath(__file__))
-    config_path = os.path.join(script_dir, 'config.toml')
+    dotenv_file = os.path.join(script_dir, '.env')
+    load_dotenv(dotenv_file)
 
-    if os.path.isfile(config_path):
-        try:
-            cfg = toml.load(config_path)
-            logger.info("Loaded configuration from config.toml", path=config_path)
-        except Exception as e:
-            logger.error("Failed to parse config.toml; falling back to .env", error=str(e))
-            cfg = None
-    else:
-        logger.warning("config.toml not found at %s; falling back to .env", config_path)
-        cfg = None
-
-    if cfg is None:
-        # load .env next to script
-        dotenv_file = os.path.join(script_dir, '.env')
-        load_dotenv(dotenv_file)
-        cfg = {
-            'graph': {
-                'client_id':     os.getenv('CLIENT_ID'),
-                'client_secret': os.getenv('CLIENT_SECRET'),
-                'tenant_id':     os.getenv('TENANT_ID'),
-                'base_url':      os.getenv('GRAPH_BASE_URL', 'https://graph.microsoft.com/v1.0'),
-            },
-            'mail': {
-                'user':        os.getenv('MAIL_USER'),
-                'folder_path': json.loads(os.getenv('MAIL_FOLDER_PATH', '[]')),
-            },
-            'analysis': {'top_n': int(os.getenv('TOP_N', '5'))},
-            'nlp':      {'model': os.getenv('NLP_MODEL', 'distilbert-base-uncased')},
-            'meta':     {'git_sha': os.getenv('GIT_SHA', '')},
-        }
+    cfg = {
+        'graph': {
+            'client_id':     os.getenv('CLIENT_ID'),
+            'client_secret': os.getenv('CLIENT_SECRET'),
+            'tenant_id':     os.getenv('TENANT_ID'),
+            'base_url':      os.getenv('GRAPH_BASE_URL', 'https://graph.microsoft.com/v1.0'),
+            'auth_mode':     os.getenv('AZ_AUTH_MODE', 'app'),
+            'username':      os.getenv('AZ_USERNAME'),
+            'password':      os.getenv('AZ_PASSWORD'),
+            'user_id':       os.getenv('AZ_USER_ID'),
+        },
+        'mail': {
+            'user':        os.getenv('MAIL_USER'),
+            'folder_path': json.loads(os.getenv('MAIL_FOLDER_PATH', '[]')),
+        },
+        'analysis': {'top_n': int(os.getenv('TOP_N', '5'))},
+        'nlp':      {'model': os.getenv('NLP_MODEL', 'distilbert-base-uncased')},
+        'meta':     {'git_sha': os.getenv('GIT_SHA', '')},
+    }
 
     logger.info("Starting pipeline", git_sha=cfg.get('meta', {}).get('git_sha', ''))
 
