@@ -20,6 +20,7 @@ Modernized PhD-level email analytics pipeline:
 import asyncio
 import os
 import json
+import re
 from dotenv import load_dotenv
 
 import structlog
@@ -69,9 +70,29 @@ async def async_paginate(client: AsyncClient, url: str, params: dict):
         params = {}
     return items
 
+def _resolve_authority(graph_cfg: dict) -> str:
+    """Derive a usable Azure AD authority URL.
+
+    If ``AUTHORITY`` is supplied, that takes precedence. Otherwise we validate
+    ``TENANT_ID`` and fall back to the multi-tenant ``common`` endpoint when a
+    proper tenant cannot be determined. This mirrors Azure's own guidance and
+    prevents hard failures when a placeholder or malformed tenant is supplied.
+    """
+
+    if graph_cfg.get('authority'):
+        return graph_cfg['authority']
+
+    tenant_id = graph_cfg.get('tenant_id')
+    if tenant_id and re.fullmatch(r"[0-9a-fA-F-]{36}", tenant_id):
+        return f"https://login.microsoftonline.com/{tenant_id}"
+
+    logger.warning("TENANT_ID missing or invalid; using 'common' authority")
+    return "https://login.microsoftonline.com/common"
+
+
 def acquire_token(graph_cfg: dict) -> str:
     """Obtain an OAuth access token for Microsoft Graph."""
-    authority = f"https://login.microsoftonline.com/{graph_cfg['tenant_id']}"
+    authority = _resolve_authority(graph_cfg)
     scopes = ["https://graph.microsoft.com/.default"]
     auth_mode = graph_cfg.get('auth_mode', 'app')
     if auth_mode == 'app':
@@ -132,6 +153,7 @@ def main():
             'client_id':     os.getenv('CLIENT_ID'),
             'client_secret': os.getenv('CLIENT_SECRET'),
             'tenant_id':     os.getenv('TENANT_ID'),
+            'authority':     os.getenv('AUTHORITY'),
             'base_url':      os.getenv('GRAPH_BASE_URL', 'https://graph.microsoft.com/v1.0'),
             'auth_mode':     os.getenv('AZ_AUTH_MODE', 'app'),
             'username':      os.getenv('AZ_USERNAME'),
