@@ -14,6 +14,7 @@ from sklearn.decomposition import LatentDirichletAllocation
 from sklearn.feature_extraction.text import CountVectorizer
 from dotenv import load_dotenv
 from io import BytesIO
+from datetime import datetime
 
 try:
     from pdfminer.high_level import extract_text_to_fp
@@ -187,8 +188,16 @@ for idx, topic in enumerate(lda.components_):
 
 # ─── 5. Save to CSV for further analysis ────────────────────────────────────────────────────────────────────────
 
-df.to_csv("tmyers_inbox_summary.csv", index=False)
-print("Saved summary CSV: tmyers_inbox_summary.csv")
+output_file = "tmyers_inbox_summary.csv"
+try:
+    df.to_csv(output_file, index=False)
+    print(f"Saved summary CSV: {output_file}")
+except PermissionError:
+    # Fallback to home directory with timestamp
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    fallback = os.path.expanduser(f"~/tmyers_inbox_summary_{ts}.csv")
+    df.to_csv(fallback, index=False)
+    print(f"Permission denied on '{output_file}'. Saved to fallback path: {fallback}")
 
 _stop_matrix.set()
 _matrix_thread.join()
