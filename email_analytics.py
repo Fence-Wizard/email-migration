@@ -30,18 +30,29 @@ HEADERS = {"Authorization": f"Bearer {token}"}
 # ─── Fetch All Inbox Messages ─────────────────────────────────────────────────────────────────────────
 
 def fetch_inbox_messages():
-    url = f"https://graph.microsoft.com/v1.0/users/{USERNAME}/mailFolders/Inbox/messages"
-    params = {
+    # Initial endpoint and query parameters
+    initial_url = f"https://graph.microsoft.com/v1.0/users/{USERNAME}/mailFolders/Inbox/messages"
+    initial_params = {
         "$select": "id,subject,from,receivedDateTime,bodyPreview",
         "$top": 50
     }
     all_msgs = []
-    while url:
-        resp = requests.get(url, headers=HEADERS, params=params if "messages" in url else None)
+    next_link = initial_url
+    first_call = True
+
+    # Page through results: apply params only on the first call
+    while next_link:
+        if first_call:
+            resp = requests.get(next_link, headers=HEADERS, params=initial_params)
+            first_call = False
+        else:
+            resp = requests.get(next_link, headers=HEADERS)
+
         resp.raise_for_status()
         data = resp.json()
         all_msgs.extend(data.get("value", []))
-        url = data.get("@odata.nextLink")
+        next_link = data.get("@odata.nextLink")
+
     return all_msgs
 
 # ─── Build DataFrame ─────────────────────────────────────────────────────────────────────────
