@@ -26,7 +26,9 @@ from `.env` (or the path specified by `ENV_FILE`).
 `email_analytics.py` retrieves messages from an Outlook Inbox using the Microsoft Graph API and performs basic analytics such as sender counts, sentiment analysis, and topic modeling.
 
 1. Ensure the dependencies in `requirements.txt` are installed.
-2. Populate `.env` with `CLIENT_ID`, `CLIENT_SECRET`, and `TENANT_ID` for an Azure app with access to Microsoft Graph.
+2. Populate `.env` (or `config.toml`) with your Azure AD details. The script expects:
+   `AZ_CLIENT_ID`, `AZ_CLIENT_SECRET`, `AZ_TENANT_ID`, `AZ_USERNAME`, and `AZ_PASSWORD`.
+   These values are used to obtain a token for Microsoft Graph.
 3. Run the script:
    ```bash
    python email_analytics.py
