@@ -1,0 +1,16 @@
+[graph]
+client_id = "YOUR_AZURE_CLIENT_ID"
+client_secret = "YOUR_AZURE_CLIENT_SECRET"
+tenant_id = "YOUR_AZURE_TENANT_ID"
+username = "YOUR_AZURE_USERNAME"
+password = "YOUR_AZURE_PASSWORD"
+base_url = "https://graph.microsoft.com/v1.0"
+
+[analysis]
+top_n = 5
+
+[nlp]
+model = "distilbert-base-uncased"
+
+[meta]
+git_sha = ""
