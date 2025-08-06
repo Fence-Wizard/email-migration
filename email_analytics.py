@@ -85,9 +85,9 @@ map_paths(["Inbox"], root_id)
 def fetch_inbox_messages():
     # Initial endpoint and query parameters
     initial_url = f"{GRAPH_BASE}/users/{USERNAME}/mailFolders/Inbox/messages"
+    # only select message core fields here—no expand on attachments
     initial_params = {
         "$select": "id,subject,from,receivedDateTime,bodyPreview,parentFolderId",
-        "$expand": "attachments($select=name,@odata.mediaContentType,@odata.mediaReadLink)",
         "$top": 50
     }
     all_msgs = []
@@ -106,11 +106,19 @@ def fetch_inbox_messages():
         resp.raise_for_status()
         data = resp.json()
         for m in data.get("value", []):
+            # annotate folder context
             fid = m.get("parentFolderId")
             path = folder_paths.get(fid, [])
-            m["year"] = path[1] if len(path) > 1 else ""
+            m["year"]     = path[1] if len(path) > 1 else ""
             m["location"] = path[2] if len(path) > 2 else ""
-            m["job_num"] = path[3] if len(path) > 3 else ""
+            m["job_num"]  = path[3] if len(path) > 3 else ""
+
+            # now fetch attachments metadata separately
+            att_url = f"{GRAPH_BASE}/users/{USERNAME}/messages/{m['id']}/attachments"
+            att_resp = requests.get(att_url, headers=HEADERS)
+            att_resp.raise_for_status()
+            m["attachments"] = att_resp.json().get("value", [])
+
             all_msgs.append(m)
         next_link = data.get("@odata.nextLink")
 
