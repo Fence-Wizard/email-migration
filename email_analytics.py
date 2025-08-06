@@ -178,7 +178,14 @@ def fetch_inbox_messages():
 # ─── Build DataFrame ─────────────────────────────────────────────────────────────────────────
 msgs = fetch_inbox_messages()
 df = pd.DataFrame(msgs)
-df["receivedDateTime"] = pd.to_datetime(df["receivedDateTime"])
+# DEBUG: print available columns and sample rows to diagnose missing fields
+print("Columns available:", df.columns.tolist())
+print(df.head(3))
+# Ensure column exists before converting to datetime
+if "receivedDateTime" in df.columns:
+    df["receivedDateTime"] = pd.to_datetime(df["receivedDateTime"])
+else:
+    raise KeyError("Expected column 'receivedDateTime' not found in DataFrame")
 df = df[[
     "id","subject","sender","receivedDateTime","bodyPreview","body_content",
     "thread_id","reply_to","year","location","job_num","attachments"
