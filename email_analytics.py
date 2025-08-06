@@ -19,8 +19,8 @@ Modernized PhD-level email analytics pipeline:
 
 import asyncio
 import os
+import json
 from dotenv import load_dotenv
-load_dotenv()  # make os.getenv() read .env immediately
 
 import toml
 import structlog
@@ -123,38 +123,44 @@ async def fetch_inbox(config: dict, user_id: Optional[str] = None) -> List[Email
     ]
 
 def main():
-    # load config from config.toml, or fall back to environment
-    try:
-        cfg = toml.load('config.toml')
-    except (FileNotFoundError, toml.decoder.TomlDecodeError):
-        logger.warning("config.toml not found or invalid; falling back to .env settings")
+    # ------------------------------------------------------------------------
+    # CONFIG LOADING: first try config.toml next to this script; else fall back
+    # ------------------------------------------------------------------------
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    config_path = os.path.join(script_dir, 'config.toml')
+
+    if os.path.isfile(config_path):
+        try:
+            cfg = toml.load(config_path)
+            logger.info("Loaded configuration from config.toml", path=config_path)
+        except Exception as e:
+            logger.error("Failed to parse config.toml; falling back to .env", error=str(e))
+            cfg = None
+    else:
+        logger.warning("config.toml not found at %s; falling back to .env", config_path)
+        cfg = None
+
+    if cfg is None:
+        # load .env next to script
+        dotenv_file = os.path.join(script_dir, '.env')
+        load_dotenv(dotenv_file)
         cfg = {
-            "graph": {
-                # try AZ_*, otherwise fall back to your existing names
-                "client_id":     os.getenv("AZ_CLIENT_ID")     or os.getenv("CLIENT_ID"),
-                "client_secret": os.getenv("AZ_CLIENT_SECRET") or os.getenv("CLIENT_SECRET"),
-                "tenant_id":     os.getenv("AZ_TENANT_ID")     or os.getenv("TENANT_ID"),
-                "username":      os.getenv("AZ_USERNAME")      or os.getenv("MAIL_USER"),
-                "password":      os.getenv("AZ_PASSWORD")      or os.getenv("MAIL_PASSWORD"),
-                "base_url":      os.getenv("AZ_BASE_URL", "https://graph.microsoft.com/v1.0"),
-
-                "auth_mode":     os.getenv("AZ_AUTH_MODE", "app"),
-
-                "user_id":      os.getenv("AZ_USER_ID")      or os.getenv("USER_ID"),
-
+            'graph': {
+                'client_id':     os.getenv('CLIENT_ID'),
+                'client_secret': os.getenv('CLIENT_SECRET'),
+                'tenant_id':     os.getenv('TENANT_ID'),
+                'base_url':      os.getenv('GRAPH_BASE_URL', 'https://graph.microsoft.com/v1.0'),
             },
-            "analysis": {
-                "top_n": int(os.getenv("ANALYSIS_TOP_N", "5")),
+            'mail': {
+                'user':        os.getenv('MAIL_USER'),
+                'folder_path': json.loads(os.getenv('MAIL_FOLDER_PATH', '[]')),
             },
-            "nlp": {
-                "model": os.getenv("NLP_MODEL", "distilbert-base-uncased"),
-            },
-            "meta": {
-                "git_sha": os.getenv("GIT_SHA", ""),
-            },
+            'analysis': {'top_n': int(os.getenv('TOP_N', '5'))},
+            'nlp':      {'model': os.getenv('NLP_MODEL', 'distilbert-base-uncased')},
+            'meta':     {'git_sha': os.getenv('GIT_SHA', '')},
         }
 
-    logger.info("Starting pipeline", git_sha=cfg.get("meta", {}).get("git_sha", ""))
+    logger.info("Starting pipeline", git_sha=cfg.get('meta', {}).get('git_sha', ''))
 
     user_id = cfg['graph'].get('user_id') if cfg['graph'].get('client_secret') else None
     emails = asyncio.run(fetch_inbox(cfg, user_id=user_id))
