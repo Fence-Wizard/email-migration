@@ -66,16 +66,19 @@ def acquire_token(graph_cfg: dict) -> str:
     """Obtain an OAuth access token for Microsoft Graph."""
     authority = f"https://login.microsoftonline.com/{graph_cfg['tenant_id']}"
     scopes = ["https://graph.microsoft.com/.default"]
-    # Prefer Client Credentials flow if a client_secret is present
-    if graph_cfg.get('client_secret'):
+    auth_mode = graph_cfg.get('auth_mode', 'app')
+    if auth_mode == 'app':
+        if not graph_cfg.get('client_secret'):
+            raise RuntimeError('client_secret required for app auth_mode')
         app = msal.ConfidentialClientApplication(
             graph_cfg['client_id'],
             authority=authority,
             client_credential=graph_cfg['client_secret'],
         )
         result = app.acquire_token_for_client(scopes=scopes)
-    # Fallback to ROPC flow only if no client_secret
-    elif graph_cfg.get('username') and graph_cfg.get('password'):
+    elif auth_mode == 'delegated':
+        if not (graph_cfg.get('username') and graph_cfg.get('password')):
+            raise RuntimeError('username and password required for delegated auth_mode')
         app = msal.PublicClientApplication(graph_cfg['client_id'], authority=authority)
         result = app.acquire_token_by_username_password(
             graph_cfg['username'],
@@ -83,7 +86,7 @@ def acquire_token(graph_cfg: dict) -> str:
             scopes=scopes,
         )
     else:
-        raise RuntimeError('No valid authentication credentials found in config.')
+        raise RuntimeError(f"Unsupported auth_mode: {auth_mode}")
     if 'access_token' not in result:
         raise RuntimeError(f"Token acquisition failed: {result.get('error_description')}")
     return result['access_token']
@@ -126,7 +129,11 @@ def main():
                 "username":      os.getenv("AZ_USERNAME")      or os.getenv("MAIL_USER"),
                 "password":      os.getenv("AZ_PASSWORD")      or os.getenv("MAIL_PASSWORD"),
                 "base_url":      os.getenv("AZ_BASE_URL", "https://graph.microsoft.com/v1.0"),
+
+                "auth_mode":     os.getenv("AZ_AUTH_MODE", "app"),
+
                 "user_id":      os.getenv("AZ_USER_ID")      or os.getenv("USER_ID"),
+
             },
             "analysis": {
                 "top_n": int(os.getenv("ANALYSIS_TOP_N", "5")),
