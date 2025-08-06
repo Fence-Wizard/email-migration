@@ -18,6 +18,7 @@ Modernized PhD-level email analytics pipeline:
 """
 
 import asyncio
+import os
 import toml
 import structlog
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -73,9 +74,32 @@ async def fetch_inbox(config: dict) -> List[EmailMessage]:
     ]
 
 def main():
-    # load config and record provenance
-    cfg = toml.load('config.toml')
-    logger.info("Starting pipeline", git_sha=cfg['meta']['git_sha'])
+    # load config from config.toml, or fall back to environment
+    try:
+        cfg = toml.load('config.toml')
+    except (FileNotFoundError, toml.decoder.TomlDecodeError):
+        logger.warning("config.toml not found or invalid; falling back to .env settings")
+        cfg = {
+            "graph": {
+                "client_id": os.getenv("AZ_CLIENT_ID"),
+                "client_secret": os.getenv("AZ_CLIENT_SECRET"),
+                "tenant_id": os.getenv("AZ_TENANT_ID"),
+                "username": os.getenv("AZ_USERNAME"),
+                "password": os.getenv("AZ_PASSWORD"),
+                "base_url": os.getenv("AZ_BASE_URL", "https://graph.microsoft.com/v1.0"),
+            },
+            "analysis": {
+                "top_n": int(os.getenv("ANALYSIS_TOP_N", "5")),
+            },
+            "nlp": {
+                "model": os.getenv("NLP_MODEL", "distilbert-base-uncased"),
+            },
+            "meta": {
+                "git_sha": os.getenv("GIT_SHA", ""),
+            },
+        }
+
+    logger.info("Starting pipeline", git_sha=cfg.get("meta", {}).get("git_sha", ""))
 
     emails = asyncio.run(fetch_inbox(cfg))
 
