@@ -66,7 +66,16 @@ def acquire_token(graph_cfg: dict) -> str:
     """Obtain an OAuth access token for Microsoft Graph."""
     authority = f"https://login.microsoftonline.com/{graph_cfg['tenant_id']}"
     scopes = ["https://graph.microsoft.com/.default"]
-    if graph_cfg.get('username') and graph_cfg.get('password'):
+    # Prefer Client Credentials flow if a client_secret is present
+    if graph_cfg.get('client_secret'):
+        app = msal.ConfidentialClientApplication(
+            graph_cfg['client_id'],
+            authority=authority,
+            client_credential=graph_cfg['client_secret'],
+        )
+        result = app.acquire_token_for_client(scopes=scopes)
+    # Fallback to ROPC flow only if no client_secret
+    elif graph_cfg.get('username') and graph_cfg.get('password'):
         app = msal.PublicClientApplication(graph_cfg['client_id'], authority=authority)
         result = app.acquire_token_by_username_password(
             graph_cfg['username'],
@@ -74,12 +83,7 @@ def acquire_token(graph_cfg: dict) -> str:
             scopes=scopes,
         )
     else:
-        app = msal.ConfidentialClientApplication(
-            graph_cfg['client_id'],
-            authority=authority,
-            client_credential=graph_cfg['client_secret'],
-        )
-        result = app.acquire_token_for_client(scopes=scopes)
+        raise RuntimeError('No valid authentication credentials found in config.')
     if 'access_token' not in result:
         raise RuntimeError(f"Token acquisition failed: {result.get('error_description')}")
     return result['access_token']
