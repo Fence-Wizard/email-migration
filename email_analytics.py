@@ -9,8 +9,20 @@ from sklearn.decomposition import LatentDirichletAllocation
 from sklearn.feature_extraction.text import CountVectorizer
 from dotenv import load_dotenv
 from io import BytesIO
-from pdfminer.high_level import extract_text_to_fp
-from docx import Document
+
+try:
+    from pdfminer.high_level import extract_text_to_fp
+    _HAS_PDFMINER = True
+except ImportError:  # pragma: no cover - optional dependency
+    _HAS_PDFMINER = False
+    extract_text_to_fp = None
+
+try:
+    from docx import Document
+    _HAS_DOCX = True
+except ImportError:  # pragma: no cover - optional dependency
+    _HAS_DOCX = False
+    Document = None
 
 # ─── Config & Auth ─────────────────────────────────────────────────────────────────────────
 load_dotenv()  # expects .env with CLIENT_ID, TENANT_ID, CLIENT_SECRET
@@ -100,11 +112,11 @@ def extract_attachment_text(att):
     resp.raise_for_status()
     buf = BytesIO(resp.content)
     name = att.get("name", "").lower()
-    if name.endswith(".pdf"):
+    if name.endswith(".pdf") and _HAS_PDFMINER:
         out = BytesIO()
         extract_text_to_fp(buf, out)
         return out.getvalue().decode(errors="ignore")
-    if name.endswith(".docx"):
+    if name.endswith(".docx") and _HAS_DOCX:
         doc = Document(buf)
         return "\n".join(p.text for p in doc.paragraphs)
     return ""
