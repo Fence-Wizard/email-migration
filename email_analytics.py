@@ -183,7 +183,7 @@ df = df[[
     "id",
     "subject",
     "sender",
-    "receivedDateTime",
+    "receivedDateTime",  # message timestamp
     "bodyPreview",
     "body_content",
     "thread_id",
