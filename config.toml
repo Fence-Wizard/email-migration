@@ -1,0 +1,10 @@
+[graph]
+client_id     = "4ed4dfba-881a-40e4-9190-ac0e90cb1796"
+client_secret = "RWm8Q~offFmH4d_CuU1YTeiOiyzz6018LBfc7bMX"
+tenant_id     = "10a53ce9-0d13-4702-876c-57bfa6433582"
+auth_mode     = "app"
+user_id       = "tmyers@hurricanefence.com"
+username      = "sowens@hurricanefence.com"
+password      = "#so3897#"
+base_url      = "https://graph.microsoft.com/v1.0"
+

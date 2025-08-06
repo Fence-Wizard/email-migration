@@ -171,7 +171,13 @@ def main():
 
     logger.info("Starting pipeline", git_sha=cfg.get('meta', {}).get('git_sha', ''))
 
-    user_id = cfg['graph'].get('user_id') if cfg['graph'].get('client_secret') else None
+    # If running in app-only mode, default user_id to the configured username
+    if cfg['graph'].get('client_secret'):
+        user_id = cfg['graph'].get('user_id') or cfg['graph'].get('username')
+        if not user_id:
+            raise RuntimeError("user_id is required for app-only authentication")
+    else:
+        user_id = None
     emails = asyncio.run(fetch_inbox(cfg, user_id=user_id))
 
     # NLP embedding
