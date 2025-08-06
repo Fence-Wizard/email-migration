@@ -29,7 +29,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from httpx import AsyncClient, HTTPError
 from pydantic import BaseModel
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 from transformers import AutoTokenizer, AutoModel
 import numpy as np
 try:
@@ -92,11 +92,17 @@ def acquire_token(graph_cfg: dict) -> str:
     return result['access_token']
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=2, max=10))
-async def fetch_inbox(config: dict) -> List[EmailMessage]:
+async def fetch_inbox(config: dict, user_id: Optional[str] = None) -> List[EmailMessage]:
     token = acquire_token(config['graph'])
     headers = {"Authorization": f"Bearer {token}"}
     async with AsyncClient(base_url=config['graph']['base_url'], headers=headers) as client:
-        raw = await async_paginate(client, '/me/mailFolders/Inbox/messages', {'$top':50})
+        if config['graph'].get('client_secret'):
+            if not user_id:
+                raise RuntimeError("user_id is required for app-only authentication")
+            endpoint = f"/users/{user_id}/mailFolders/Inbox/messages"
+        else:
+            endpoint = "/me/mailFolders/Inbox/messages"
+        raw = await async_paginate(client, endpoint, {'$top':50})
     return [
         EmailMessage(
             id=m['id'],
@@ -123,7 +129,11 @@ def main():
                 "username":      os.getenv("AZ_USERNAME")      or os.getenv("MAIL_USER"),
                 "password":      os.getenv("AZ_PASSWORD")      or os.getenv("MAIL_PASSWORD"),
                 "base_url":      os.getenv("AZ_BASE_URL", "https://graph.microsoft.com/v1.0"),
+
                 "auth_mode":     os.getenv("AZ_AUTH_MODE", "app"),
+
+                "user_id":      os.getenv("AZ_USER_ID")      or os.getenv("USER_ID"),
+
             },
             "analysis": {
                 "top_n": int(os.getenv("ANALYSIS_TOP_N", "5")),
@@ -138,7 +148,8 @@ def main():
 
     logger.info("Starting pipeline", git_sha=cfg.get("meta", {}).get("git_sha", ""))
 
-    emails = asyncio.run(fetch_inbox(cfg))
+    user_id = cfg['graph'].get('user_id') if cfg['graph'].get('client_secret') else None
+    emails = asyncio.run(fetch_inbox(cfg, user_id=user_id))
 
     # NLP embedding
     tok = AutoTokenizer.from_pretrained(cfg['nlp']['model'])
