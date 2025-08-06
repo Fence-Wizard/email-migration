@@ -6,7 +6,8 @@ httpx>=0.24.0
 tenacity>=8.2.2
 structlog>=23.1.0
 transformers>=4.30.0
-pymdptoolbox>=4.11
+# pymdptoolbox only publishes beta releases; pin to the latest beta
+pymdptoolbox>=4.0b1,<5.0
 python-dotenv>=1.0
 beautifulsoup4>=4.11.1
 colorama>=0.4.6

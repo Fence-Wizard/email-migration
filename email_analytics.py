@@ -28,7 +28,10 @@ from typing import List
 from transformers import AutoTokenizer, AutoModel
 import numpy as np
 import hdbscan
-import pymdptoolbox
+try:
+    from pymdptoolbox.mdp import ValueIteration
+except ImportError:
+    ValueIteration = None
 
 # structured logger
 logger = structlog.get_logger()
@@ -83,8 +86,17 @@ def main():
     clusters = hdbscan.HDBSCAN(min_cluster_size=5).fit_predict(embs)
     logger.info("Clusters discovered", clusters=np.unique(clusters))
 
-    # Game-theory / MDP stub
-    # TODO: define states/actions, rewards, then solve with pymdptoolbox.
+    # Game-theory / MDP stub (only if pymdptoolbox is installed)
+    if ValueIteration is None:
+        logger.warning("pymdptoolbox not installed; skipping MDP analysis")
+    else:
+        # placeholder P, R to demonstrate usage
+        n_states, n_actions = 5, 2
+        P = [[[1.0 / n_states for _ in range(n_states)] for _ in range(n_states)] for _ in range(n_actions)]
+        R = [[0.0 for _ in range(n_states)] for _ in range(n_actions)]
+        vi = ValueIteration(P, R, discount=0.95)
+        vi.run()
+        logger.info("Computed MDP policy", policy=vi.policy.tolist())
 
 if __name__ == '__main__':
     main()
