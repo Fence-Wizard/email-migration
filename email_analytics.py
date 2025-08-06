@@ -71,13 +71,31 @@ GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 # ─── Locate root folder "2024 Jobs" and map IDs to paths ──────────
 
 def find_root_folder(name: str) -> str:
-    """Return folder id by display name or raise RuntimeError."""
-    resp = requests.get(f"{GRAPH_BASE}/users/{USERNAME}/mailFolders", headers=HEADERS)
-    resp.raise_for_status()
-    for f in resp.json().get("value", []):
-        if f.get("displayName") == name:
-            return f["id"]
-    raise RuntimeError(f"Folder named '{name}' not found.")
+    """Recursively search Inbox's child folders for *name* and return its ID."""
+    # 1) Retrieve Inbox folder ID
+    inbox_resp = requests.get(
+        f"{GRAPH_BASE}/users/{USERNAME}/mailFolders/Inbox", headers=HEADERS
+    )
+    inbox_resp.raise_for_status()
+    inbox_id = inbox_resp.json()["id"]
+
+    def recurse(parent_id: str):
+        """Depth-first search through child folders."""
+        url = f"{GRAPH_BASE}/users/{USERNAME}/mailFolders/{parent_id}/childFolders"
+        r = requests.get(url, headers=HEADERS)
+        r.raise_for_status()
+        for child in r.json().get("value", []):
+            if child.get("displayName") == name:
+                return child["id"]
+            found = recurse(child["id"])
+            if found:
+                return found
+        return None
+
+    result = recurse(inbox_id)
+    if not result:
+        raise RuntimeError(f"Folder named '{name}' not found under Inbox.")
+    return result
 
 ROOT_NAME = "2024 Jobs"
 root_id = find_root_folder(ROOT_NAME)
