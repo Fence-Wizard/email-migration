@@ -120,8 +120,9 @@ map_paths([ROOT_NAME], root_id)
 def fetch_inbox_messages():
     # Page through "2024 Jobs" folder messages
     initial_url = f"{GRAPH_BASE}/users/{USERNAME}/mailFolders/{root_id}/messages"
+    # don't select full body here (unsupported on list call) - fetch per message
     initial_params = {
-        "$select": "id,subject,from,receivedDateTime,body,conversationId,inReplyTo,parentFolderId",
+        "$select": "id,subject,from,receivedDateTime,bodyPreview,conversationId,inReplyTo,parentFolderId",
         "$top": 50,
     }
     all_msgs = []
@@ -144,9 +145,17 @@ def fetch_inbox_messages():
             m["year"] = path[1] if len(path) > 1 else ""
             m["location"] = path[2] if len(path) > 2 else ""
             m["job_num"] = path[3] if len(path) > 3 else ""
+
             m["thread_id"] = m.get("conversationId")
             m["reply_to"] = m.get("inReplyTo")
 
+            # retrieve the full body content for each message
+            body_url = f"{GRAPH_BASE}/users/{USERNAME}/messages/{m['id']}?$select=body"
+            body_resp = requests.get(body_url, headers=HEADERS)
+            body_resp.raise_for_status()
+            m["body_content"] = body_resp.json().get("body", {}).get("content", "")
+
+            # fetch attachments metadata
             att_url = f"{GRAPH_BASE}/users/{USERNAME}/messages/{m['id']}/attachments"
             att_resp = requests.get(att_url, headers=HEADERS)
             att_resp.raise_for_status()
@@ -162,13 +171,13 @@ msgs = fetch_inbox_messages()
 df = pd.DataFrame(msgs)
 df["sender"] = df["from"].apply(lambda f: f.get("emailAddress", {}).get("address"))
 df["receivedDateTime"] = pd.to_datetime(df["receivedDateTime"])
-df["body.content"] = df["body"].apply(lambda b: b.get("content") if isinstance(b, dict) else "")
 df = df[[
     "id",
     "subject",
     "sender",
     "receivedDateTime",
-    "body.content",
+    "bodyPreview",
+    "body_content",
     "thread_id",
     "reply_to",
     "year",
@@ -210,7 +219,7 @@ df["attachment_text"] = df["attachments"].apply(
 )
 
 # ─── Combine for full-text analysis ─────────────────────────────────────────────
-df["full_text"] = df["body.content"].fillna("") + "\n\n" + df["attachment_text"].fillna("")
+df["full_text"] = df["body_content"].fillna("") + "\n\n" + df["attachment_text"].fillna("")
 
 # ─── 1. Basic Descriptives ────────────────────────────────────────────────────────────────────────
 print(f"Total messages: {len(df)}")
