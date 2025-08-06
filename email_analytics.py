@@ -131,15 +131,17 @@ def fetch_inbox_messages():
     first_call = True
 
     while next_link:
-        resp = requests.get(
-            next_link,
-            headers=HEADERS,
-            params=initial_params if first_call else None,
-        )
-        first_call = False
-
-        resp.raise_for_status()
+        params = initial_params if first_call else None
+        # ─── DEBUG: log the folder, URL, params and response details ────────────────
+        print(f"DEBUG: Fetching messages from folder_id={root_id}")
+        print(f"DEBUG: GET {next_link} with params={params}")
+        resp = requests.get(next_link, headers=HEADERS, params=params)
+        print(f"DEBUG: HTTP status {resp.status_code}")
         data = resp.json()
+        print(f"DEBUG: response keys: {list(data.keys())}")
+        print(f"DEBUG: number of messages received: {len(data.get('value', []))}")
+        resp.raise_for_status()
+        first_call = False
         for m in data.get("value", []):
             fid = m.get("parentFolderId")
             path = folder_paths.get(fid, [])
