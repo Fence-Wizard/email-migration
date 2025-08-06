@@ -29,8 +29,11 @@ from `.env` (or the path specified by `ENV_FILE`).
 2. Populate `.env` with your Azure AD details. Add `AZ_AUTH_MODE` to choose between:
    - `app` &mdash; client credential flow using `AZ_CLIENT_SECRET`.
    - `delegated` &mdash; username/password flow using `AZ_USERNAME` and `AZ_PASSWORD`.
-   At minimum the script expects `CLIENT_ID` and `TENANT_ID`, plus the
-   credentials required for the selected mode.
+   At minimum the script expects `CLIENT_ID` and one of:
+   - `TENANT_ID` &mdash; a GUID for your Azure AD tenant; or
+   - `AUTHORITY` &mdash; a full authority URL such as `https://login.microsoftonline.com/organizations`.
+   If neither value is supplied the script automatically falls back to the
+   multi-tenant `common` endpoint.
 3. Run the script:
    ```bash
    python email_analytics.py
