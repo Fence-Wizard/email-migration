@@ -180,18 +180,8 @@ msgs = fetch_inbox_messages()
 df = pd.DataFrame(msgs)
 df["receivedDateTime"] = pd.to_datetime(df["receivedDateTime"])
 df = df[[
-    "id",
-    "subject",
-    "sender",
-    "receivedDateTime",  # message timestamp
-    "bodyPreview",
-    "body_content",
-    "thread_id",
-    "reply_to",
-    "year",
-    "location",
-    "job_num",
-    "attachments",
+    "id","subject","sender","receivedDateTime","bodyPreview","body_content",
+    "thread_id","reply_to","year","location","job_num","attachments"
 ]]
 
 # ─── Extract attachment text ────────────────────────────────────────────────────
