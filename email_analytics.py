@@ -15,6 +15,9 @@ from sklearn.feature_extraction.text import CountVectorizer
 from dotenv import load_dotenv
 from io import BytesIO
 from datetime import datetime
+import openpyxl
+import pytesseract
+from PIL import Image
 
 try:
     from pdfminer.high_level import extract_text_to_fp
@@ -65,12 +68,23 @@ token = app.acquire_token_for_client(SCOPES)["access_token"]
 HEADERS = {"Authorization": f"Bearer {token}"}
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 
-# ─── Map folder IDs to path elements ──────────────────────────────
-root = requests.get(f"{GRAPH_BASE}/users/{USERNAME}/mailFolders/Inbox", headers=HEADERS)
-root.raise_for_status()
-root_id = root.json()["id"]
+# ─── Locate root folder "2024 Jobs" and map IDs to paths ──────────
+
+def find_root_folder(name: str) -> str:
+    """Return folder id by display name or raise RuntimeError."""
+    resp = requests.get(f"{GRAPH_BASE}/users/{USERNAME}/mailFolders", headers=HEADERS)
+    resp.raise_for_status()
+    for f in resp.json().get("value", []):
+        if f.get("displayName") == name:
+            return f["id"]
+    raise RuntimeError(f"Folder named '{name}' not found.")
+
+ROOT_NAME = "2024 Jobs"
+root_id = find_root_folder(ROOT_NAME)
 
 folder_paths = {}
+
+
 def map_paths(path, fid):
     folder_paths[fid] = path
     url = f"{GRAPH_BASE}/users/{USERNAME}/mailFolders/{fid}/childFolders"
@@ -79,42 +93,42 @@ def map_paths(path, fid):
     for child in resp.json().get("value", []):
         map_paths(path + [child["displayName"]], child["id"])
 
-map_paths(["Inbox"], root_id)
 
-# ─── Fetch All Inbox Messages ─────────────────────────────────────────────────────────────────────────
+map_paths([ROOT_NAME], root_id)
+
+# ─── Fetch messages from the "2024 Jobs" folder ───────────────────
+
 
 def fetch_inbox_messages():
-    # Initial endpoint and query parameters
-    initial_url = f"{GRAPH_BASE}/users/{USERNAME}/mailFolders/Inbox/messages"
-    # only select message core fields here—no expand on attachments
+    # Page through "2024 Jobs" folder messages
+    initial_url = f"{GRAPH_BASE}/users/{USERNAME}/mailFolders/{root_id}/messages"
     initial_params = {
-        "$select": "id,subject,from,receivedDateTime,bodyPreview,parentFolderId",
-        "$top": 50
+        "$select": "id,subject,from,receivedDateTime,body,conversationId,inReplyTo,parentFolderId",
+        "$top": 50,
     }
     all_msgs = []
     next_link = initial_url
     first_call = True
 
-    # Page through results: apply params only on the first call
     while next_link:
         resp = requests.get(
             next_link,
             headers=HEADERS,
-            params=initial_params if first_call else None
+            params=initial_params if first_call else None,
         )
         first_call = False
 
         resp.raise_for_status()
         data = resp.json()
         for m in data.get("value", []):
-            # annotate folder context
             fid = m.get("parentFolderId")
             path = folder_paths.get(fid, [])
-            m["year"]     = path[1] if len(path) > 1 else ""
+            m["year"] = path[1] if len(path) > 1 else ""
             m["location"] = path[2] if len(path) > 2 else ""
-            m["job_num"]  = path[3] if len(path) > 3 else ""
+            m["job_num"] = path[3] if len(path) > 3 else ""
+            m["thread_id"] = m.get("conversationId")
+            m["reply_to"] = m.get("inReplyTo")
 
-            # now fetch attachments metadata separately
             att_url = f"{GRAPH_BASE}/users/{USERNAME}/messages/{m['id']}/attachments"
             att_resp = requests.get(att_url, headers=HEADERS)
             att_resp.raise_for_status()
@@ -128,10 +142,22 @@ def fetch_inbox_messages():
 # ─── Build DataFrame ─────────────────────────────────────────────────────────────────────────
 msgs = fetch_inbox_messages()
 df = pd.DataFrame(msgs)
-# normalize sender
 df["sender"] = df["from"].apply(lambda f: f.get("emailAddress", {}).get("address"))
 df["receivedDateTime"] = pd.to_datetime(df["receivedDateTime"])
-df = df[["id","subject","sender","receivedDateTime","bodyPreview","year","location","job_num","attachments"]]
+df["body.content"] = df["body"].apply(lambda b: b.get("content") if isinstance(b, dict) else "")
+df = df[[
+    "id",
+    "subject",
+    "sender",
+    "receivedDateTime",
+    "body.content",
+    "thread_id",
+    "reply_to",
+    "year",
+    "location",
+    "job_num",
+    "attachments",
+]]
 
 # ─── Extract attachment text ────────────────────────────────────────────────────
 def extract_attachment_text(att):
@@ -149,6 +175,16 @@ def extract_attachment_text(att):
     if name.endswith(".docx") and _HAS_DOCX:
         doc = Document(buf)
         return "\n".join(p.text for p in doc.paragraphs)
+    if name.endswith(".xlsx"):
+        wb = openpyxl.load_workbook(buf, data_only=True)
+        texts = []
+        for sheet in wb.worksheets:
+            for row in sheet.iter_rows(values_only=True):
+                texts.append(" ".join(str(c) for c in row if c is not None))
+        return "\n".join(texts)
+    if any(name.endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"]):
+        img = Image.open(buf)
+        return pytesseract.image_to_string(img)
     return ""
 
 df["attachment_text"] = df["attachments"].apply(
@@ -156,7 +192,7 @@ df["attachment_text"] = df["attachments"].apply(
 )
 
 # ─── Combine for full-text analysis ─────────────────────────────────────────────
-df["full_text"] = (df["bodyPreview"].fillna("") + "\n" + df["attachment_text"]).fillna("")
+df["full_text"] = df["body.content"].fillna("") + "\n\n" + df["attachment_text"].fillna("")
 
 # ─── 1. Basic Descriptives ────────────────────────────────────────────────────────────────────────
 print(f"Total messages: {len(df)}")

@@ -11,3 +11,6 @@ nltk>=3.8
 textblob>=0.17
 pdfminer.six>=20240524
 python-docx>=0.8.11
+openpyxl>=3.1.2
+pillow>=11.0.0
+pytesseract>=0.3.10
