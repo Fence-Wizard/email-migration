@@ -163,6 +163,13 @@ def fetch_inbox_messages():
             att_resp.raise_for_status()
             m["attachments"] = att_resp.json().get("value", [])
 
+            # extract the sender address into its own field
+            m["sender"] = (
+                m.get("from", {})
+                .get("emailAddress", {})
+                .get("address", "")
+            )
+
             all_msgs.append(m)
         next_link = data.get("@odata.nextLink")
 
@@ -171,12 +178,10 @@ def fetch_inbox_messages():
 # ─── Build DataFrame ─────────────────────────────────────────────────────────────────────────
 msgs = fetch_inbox_messages()
 df = pd.DataFrame(msgs)
-df["sender"] = df["from"].apply(lambda f: f.get("emailAddress", {}).get("address"))
 df["receivedDateTime"] = pd.to_datetime(df["receivedDateTime"])
 df = df[[
     "id",
     "subject",
-    "from",
     "sender",
     "receivedDateTime",
     "bodyPreview",
