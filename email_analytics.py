@@ -1,5 +1,10 @@
 import os
 import json
+import sys
+import time
+import random
+import threading
+import shutil
 import requests
 import msal
 import pandas as pd
@@ -11,6 +16,22 @@ from dotenv import load_dotenv
 from io import BytesIO
 from pdfminer.high_level import extract_text_to_fp
 from docx import Document
+
+
+def _matrix_rain(stop_event):
+    """Continuously print green Matrix-style text until stop_event is set."""
+    chars = "abcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()"
+    width = shutil.get_terminal_size((80, 20)).columns
+    while not stop_event.is_set():
+        line = "".join(random.choice(chars) for _ in range(width))
+        sys.stdout.write("\033[32m" + line + "\033[0m\n")
+        sys.stdout.flush()
+        time.sleep(0.05)
+
+
+_stop_matrix = threading.Event()
+_matrix_thread = threading.Thread(target=_matrix_rain, args=(_stop_matrix,), daemon=True)
+_matrix_thread.start()
 
 # ─── Config & Auth ─────────────────────────────────────────────────────────────────────────
 load_dotenv()  # expects .env with CLIENT_ID, TENANT_ID, CLIENT_SECRET
@@ -148,3 +169,6 @@ for idx, topic in enumerate(lda.components_):
 
 df.to_csv("tmyers_inbox_summary.csv", index=False)
 print("Saved summary CSV: tmyers_inbox_summary.csv")
+
+_stop_matrix.set()
+_matrix_thread.join()
