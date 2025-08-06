@@ -55,7 +55,15 @@ async def async_paginate(client: AsyncClient, url: str, params: dict):
     items = []
     while url:
         resp = await client.get(url, params=params)
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except HTTPError:
+            try:
+                body = resp.json()
+            except ValueError:
+                body = resp.text
+            logger.error("HTTP request failed", url=str(resp.url), body=body)
+            raise
         data = resp.json()
         items.extend(data.get('value', []))
         url = data.get('@odata.nextLink')
