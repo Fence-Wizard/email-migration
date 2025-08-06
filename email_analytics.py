@@ -8,6 +8,9 @@ from textblob import TextBlob
 from sklearn.decomposition import LatentDirichletAllocation
 from sklearn.feature_extraction.text import CountVectorizer
 from dotenv import load_dotenv
+from io import BytesIO
+from pdfminer.high_level import extract_text_to_fp
+from docx import Document
 
 # ─── Config & Auth ─────────────────────────────────────────────────────────────────────────
 load_dotenv()  # expects .env with CLIENT_ID, TENANT_ID, CLIENT_SECRET
@@ -26,14 +29,32 @@ app = msal.ConfidentialClientApplication(
 )
 token = app.acquire_token_for_client(SCOPES)["access_token"]
 HEADERS = {"Authorization": f"Bearer {token}"}
+GRAPH_BASE = "https://graph.microsoft.com/v1.0"
+
+# ─── Map folder IDs to path elements ──────────────────────────────
+root = requests.get(f"{GRAPH_BASE}/users/{USERNAME}/mailFolders/Inbox", headers=HEADERS)
+root.raise_for_status()
+root_id = root.json()["id"]
+
+folder_paths = {}
+def map_paths(path, fid):
+    folder_paths[fid] = path
+    url = f"{GRAPH_BASE}/users/{USERNAME}/mailFolders/{fid}/childFolders"
+    resp = requests.get(url, headers=HEADERS)
+    resp.raise_for_status()
+    for child in resp.json().get("value", []):
+        map_paths(path + [child["displayName"]], child["id"])
+
+map_paths(["Inbox"], root_id)
 
 # ─── Fetch All Inbox Messages ─────────────────────────────────────────────────────────────────────────
 
 def fetch_inbox_messages():
     # Initial endpoint and query parameters
-    initial_url = f"https://graph.microsoft.com/v1.0/users/{USERNAME}/mailFolders/Inbox/messages"
+    initial_url = f"{GRAPH_BASE}/users/{USERNAME}/mailFolders/Inbox/messages"
     initial_params = {
-        "$select": "id,subject,from,receivedDateTime,bodyPreview",
+        "$select": "id,subject,from,receivedDateTime,bodyPreview,parentFolderId",
+        "$expand": "attachments($select=name,@odata.mediaContentType,@odata.mediaReadLink)",
         "$top": 50
     }
     all_msgs = []
@@ -42,15 +63,22 @@ def fetch_inbox_messages():
 
     # Page through results: apply params only on the first call
     while next_link:
-        if first_call:
-            resp = requests.get(next_link, headers=HEADERS, params=initial_params)
-            first_call = False
-        else:
-            resp = requests.get(next_link, headers=HEADERS)
+        resp = requests.get(
+            next_link,
+            headers=HEADERS,
+            params=initial_params if first_call else None
+        )
+        first_call = False
 
         resp.raise_for_status()
         data = resp.json()
-        all_msgs.extend(data.get("value", []))
+        for m in data.get("value", []):
+            fid = m.get("parentFolderId")
+            path = folder_paths.get(fid, [])
+            m["year"] = path[1] if len(path) > 1 else ""
+            m["location"] = path[2] if len(path) > 2 else ""
+            m["job_num"] = path[3] if len(path) > 3 else ""
+            all_msgs.append(m)
         next_link = data.get("@odata.nextLink")
 
     return all_msgs
@@ -61,7 +89,32 @@ df = pd.DataFrame(msgs)
 # normalize sender
 df["sender"] = df["from"].apply(lambda f: f.get("emailAddress", {}).get("address"))
 df["receivedDateTime"] = pd.to_datetime(df["receivedDateTime"])
-df = df[["id","subject","sender","receivedDateTime","bodyPreview"]]
+df = df[["id","subject","sender","receivedDateTime","bodyPreview","year","location","job_num","attachments"]]
+
+# ─── Extract attachment text ────────────────────────────────────────────────────
+def extract_attachment_text(att):
+    url = att.get("@odata.mediaReadLink")
+    if not url:
+        return ""
+    resp = requests.get(url, headers=HEADERS)
+    resp.raise_for_status()
+    buf = BytesIO(resp.content)
+    name = att.get("name", "").lower()
+    if name.endswith(".pdf"):
+        out = BytesIO()
+        extract_text_to_fp(buf, out)
+        return out.getvalue().decode(errors="ignore")
+    if name.endswith(".docx"):
+        doc = Document(buf)
+        return "\n".join(p.text for p in doc.paragraphs)
+    return ""
+
+df["attachment_text"] = df["attachments"].apply(
+    lambda atts: "\n---\n".join(extract_attachment_text(a) for a in (atts or []))
+)
+
+# ─── Combine for full-text analysis ─────────────────────────────────────────────
+df["full_text"] = (df["bodyPreview"].fillna("") + "\n" + df["attachment_text"]).fillna("")
 
 # ─── 1. Basic Descriptives ────────────────────────────────────────────────────────────────────────
 print(f"Total messages: {len(df)}")
@@ -77,13 +130,13 @@ plt.show()
 
 # ─── 3. Sentiment Analysis ────────────────────────────────────────────────────────────────────────
 
-df["sentiment"] = df["bodyPreview"].apply(lambda t: TextBlob(t).sentiment.polarity)
+df["sentiment"] = df["full_text"].apply(lambda t: TextBlob(t).sentiment.polarity)
 print("Average sentiment:", df["sentiment"].mean())
 
 # ─── 4. Topic Modeling ────────────────────────────────────────────────────────────────────────
 # Vectorize the previews
 vec = CountVectorizer(max_df=0.9, min_df=5, stop_words="english")
-X = vec.fit_transform(df["bodyPreview"].fillna(""))
+X = vec.fit_transform(df["full_text"].fillna(""))
 lda = LatentDirichletAllocation(n_components=5, random_state=0)
 lda.fit(X)
 terms = vec.get_feature_names_out()
