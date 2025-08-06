@@ -20,3 +20,6 @@ python-docx>=0.8.11
 openpyxl>=3.1.2
 pillow>=11.0.0
 pytesseract>=0.3.10
+toml>=0.10.2
+numpy>=1.23
+hdbscan>=0.8
