@@ -27,7 +27,10 @@ from datetime import datetime
 from typing import List
 from transformers import AutoTokenizer, AutoModel
 import numpy as np
-import hdbscan
+try:
+    import hdbscan
+except ImportError:
+    hdbscan = None
 try:
     from pymdptoolbox.mdp import ValueIteration
 except ImportError:
@@ -83,8 +86,13 @@ def main():
     enc = tok(texts, return_tensors='pt', padding=True, truncation=True)
     out = mdl(**enc)
     embs = out.last_hidden_state.mean(dim=1).detach().numpy()
-    clusters = hdbscan.HDBSCAN(min_cluster_size=5).fit_predict(embs)
-    logger.info("Clusters discovered", clusters=np.unique(clusters))
+    # perform clustering on the embeddings (if available)
+    if hdbscan is None:
+        logger.warning("hdbscan not available; skipping clustering step")
+        clusters = np.zeros(len(embs), dtype=int)
+    else:
+        clusters = hdbscan.HDBSCAN(min_cluster_size=5).fit_predict(embs)
+        logger.info("Clusters discovered", clusters=np.unique(clusters))
 
     # Game-theory / MDP stub (only if pymdptoolbox is installed)
     if ValueIteration is None:
